@@ -6,6 +6,8 @@ It runs between your frontend application and Ollama backend and is transparent 
 
 ![arch](https://github.com/user-attachments/assets/80b9feac-7d57-40f9-9cbc-78d0e76809c6)
 
+# Installation
+
 Copy/Clone the repository, edit the config.yaml by adding your Ollama backend servers and the max_concurrent_connections setting per endpoint. This equals to your OLLAMA_NUM_PARALLEL config settings.
 
 Run the NOMYO Router in a dedicated virtual environment, install the requirements and run with uvicorn:
@@ -23,4 +25,4 @@ uvicorn router:app --host 127.0.0.1 --port 12434
 
 # Routing
 
-
+![routing](https://github.com/user-attachments/assets/ed05dfbb-fcc8-4ff2-b8ca-3cdce2660c9f)
