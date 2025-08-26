@@ -4,7 +4,7 @@ is a transparent proxy for ![Ollama](https://github.com/ollama/ollama) with mode
 
 It runs between your frontend application and Ollama backend and is transparent for both, the front- and backend.
 
-![arch](https://github.com/user-attachments/assets/80b9feac-7d57-40f9-9cbc-78d0e76809c6)
+![arch](https://github.com/user-attachments/assets/1e0064ab-de54-4226-8a15-c0fcca64704c)
 
 # Installation
 
