@@ -1,6 +1,6 @@
 # NOMYO Router
 
-is a transparent proxy for ![Ollama](https://github.com/ollama/ollama) with model deployment aware routing.
+is a transparent proxy for [Ollama](https://github.com/ollama/ollama) with model deployment aware routing.
 
 It runs between your frontend application and Ollama backend and is transparent for both, the front- and backend.
 
