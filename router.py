@@ -742,7 +742,20 @@ async def ps_proxy(request: Request):
     )
 
 # -------------------------------------------------------------
-# 18. FastAPI startup event – load configuration
+# 18. OpenAI API compatible endpoints #ToDo
+# -------------------------------------------------------------
+@app.post("/v1/chat/completions")
+@app.post("/v1/completions")
+@app.post("/v1/models")
+@app.post("/v1/embeddings")
+async def not_implemented_yet(request: Request):
+
+    return Response(
+        status_code=501
+    )
+
+# -------------------------------------------------------------
+# 19. FastAPI startup event – load configuration
 # -------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event() -> None:
