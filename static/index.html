@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NOMYO Router Dashboard</title>
+<style>
+  body{font-family:Arial,Helvetica,sans-serif;background:#f7f7f7;color:#333;padding:20px;}
+  h1{margin-top:0;}
+  table{border-collapse:collapse;width:100%;margin-bottom:20px;}
+  th,td{border:1px solid #ddd;padding:8px;}
+  th{background:#333;color:#fff;}
+  tr:nth-child(even){background:#f2f2f2;}
+  .endpoint{font-weight:bold;}
+  .model{font-family:monospace;}
+  .loading{color:#999;}
+
+  /* NEW STYLES */
+  .tables-wrapper{
+    display:flex;
+    gap:1rem;
+    margin-top:1rem;
+  }
+  .table-container{
+    width:50%;
+  }
+  /* Ensure the heading aligns nicely inside each container */
+  .table-container h2{
+    margin:0 0 0.5rem 0;
+  }
+  /* ---- NEW STYLES FOR PORTRAIT (height > width) ---- */
+  @media (orientation: portrait) {
+    /* Stack the two tables vertically */
+    .tables-wrapper {
+      flex-direction: column;          /* instead of the default row */
+    }
+    .table-container {
+      width: 100%;                     /* full width when stacked */
+    }
+    /* Put the “Running Models” table first */
+    .table-container:nth-child(2) {    /* the PS table is the 2nd child */
+      order: -1;
+    }
+    /* Keep the other table after it (default order 0) */
+    .table-container:nth-child(1) {
+      order: 0;
+    }
+  }
+</style>
+</head>
+<body>
+<a href="https://www.nomyo.ai" target="_blank"><img src="./static/228394408.png" width="100px" height="100px"></a><h1>Router Dashboard</h1>
+
+<div class="tables-wrapper">
+  <div class="table-container">
+    <h2>Available Models (Tags)</h2>
+    <table id="tags-table">
+      <thead><tr><th>Model</th><th>Digest</th></tr></thead>
+      <tbody id="tags-body">
+        <tr><td colspan="2" class="loading">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="table-container">
+    <h2>Running Models (PS)</h2>
+    <table id="ps-table">
+      <thead><tr><th>Model</th><th>Digest</th></tr></thead>
+      <tbody id="ps-body">
+        <tr><td colspan="2" class="loading">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<h2>Configured Endpoints</h2>
+<table id="endpoints-table">
+  <thead><tr><th>Endpoint</th></tr></thead>
+  <tbody id="endpoints-body">
+    <tr><td class="loading">Loading…</td></tr>
+  </tbody>
+</table>
+
+<script>
+async function fetchJSON(url){
+  const resp = await fetch(url);
+  if(!resp.ok){ throw new Error(`Failed ${url}: ${resp.status}`); }
+  return await resp.json();
+}
+
+async function loadEndpoints(){
+  try{
+    const data = await fetchJSON('/api/config');
+    const body = document.getElementById('endpoints-body');
+    body.innerHTML = data.endpoints.map(e=>`<tr><td class="endpoint">${e}</td></tr>`).join('');
+  }catch(e){ console.error(e); }
+}
+
+async function loadTags(){
+  try{
+    const data = await fetchJSON('/api/tags');
+    const body = document.getElementById('tags-body');
+    body.innerHTML = data.models.map(m=>`<tr><td class="model">${m.name}</td><td>${m.digest}</td></tr>`).join('');
+  }catch(e){ console.error(e); }
+}
+
+async function loadPS(){
+  try{
+    const data = await fetchJSON('/api/ps');
+    const body = document.getElementById('ps-body');
+    body.innerHTML = data.models.map(m=>`<tr><td class="model">${m.name}</td><td>${m.digest}</td></tr>`).join('');
+  }catch(e){ console.error(e); }
+}
+
+window.addEventListener('load', ()=>{
+  loadEndpoints();
+  loadTags();
+  loadPS();
+});
+</script>
+</body>
+</html>
