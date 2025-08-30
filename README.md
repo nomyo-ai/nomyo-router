@@ -41,7 +41,7 @@ uvicorn router:app --host 127.0.0.1 --port 12434
 NOMYO Router accepts any Ollama request on the configured port for any Ollama endpoint from your frontend application. It then checks the available backends for the specific request.
 When the request is embed(dings), chat or generate the request will be forwarded to a single Ollama server, answered and send back to the router which forwards it back to the frontend.
 
-Any other request for the same model config is made, NOMYO Router is aware which model runs on which Ollama server and routes the request to an Ollama server where this model is already deployed.
+If another request for the same model config is made, NOMYO Router is aware which model runs on which Ollama server and routes the request to an Ollama server where this model is already deployed.
 
 If at the same time there are more than max concurrent connections than configured, NOMYO Router will route this request to another Ollama server for completion.
 
