@@ -46,3 +46,5 @@ If at the same time there are more than max concurrent connections than configur
 This way the Ollama backend servers are utilized more efficient than by simply using a wheighted, round-robin or least-connection approach.
 
 ![routing](https://github.com/user-attachments/assets/ed05dfbb-fcc8-4ff2-b8ca-3cdce2660c9f)
+
+NOMYO Router also supports OpenAI API compatible v1 backend servers.
