@@ -45,6 +45,9 @@
       order: 0;
     }
   }
+  /* Add a tiny status‑style section */
+.status-ok   { color: #006400; font-weight: bold; }   /* dark green */
+.status-error{ color: #8B0000; font-weight: bold; }   /* dark red */
 </style>
 </head>
 <body>
@@ -74,9 +77,15 @@
 
 <h2>Configured Endpoints</h2>
 <table id="endpoints-table">
-  <thead><tr><th>Endpoint</th></tr></thead>
+  <thead>
+    <tr>
+      <th>Endpoint</th>
+      <th>Status</th>
+      <th>Version</th>
+    </tr>
+  </thead>
   <tbody id="endpoints-body">
-    <tr><td class="loading">Loading…</td></tr>
+    <tr><td colspan="3" class="loading">Loading…</td></tr>
   </tbody>
 </table>
 
@@ -91,8 +100,22 @@ async function loadEndpoints(){
   try{
     const data = await fetchJSON('/api/config');
     const body = document.getElementById('endpoints-body');
-    body.innerHTML = data.endpoints.map(e=>`<tr><td class="endpoint">${e}</td></tr>`).join('');
-  }catch(e){ console.error(e); }
+    // Map each endpoint object to a table row
+    body.innerHTML = data.endpoints.map(e => {
+      const statusClass = e.status === 'ok' ? 'status-ok' : 'status-error';
+      const version = e.version || 'N/A';
+      return `
+        <tr>
+          <td class="endpoint">${e.url}</td>
+          <td class="status ${statusClass}">${e.status}</td>
+          <td class="version">${version}</td>
+        </tr>`;
+    }).join('');
+  }catch(e){
+    console.error(e);
+    const body = document.getElementById('endpoints-body');
+    body.innerHTML = `<tr><td colspan="3" class="loading">Failed to load endpoints</td></tr>`;
+  }
 }
 
 async function loadTags(){

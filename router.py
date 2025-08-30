@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Dict, Set, List
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
-from starlette.responses import StreamingResponse, JSONResponse, Response, HTMLResponse
+from starlette.responses import StreamingResponse, JSONResponse, Response, HTMLResponse, RedirectResponse
 from pydantic import Field
 from pydantic_settings import BaseSettings
 from collections import defaultdict
@@ -821,7 +821,24 @@ async def config_proxy(request: Request):
     Ollama endpoints. The front‑end uses this to display
     which endpoints are being proxied.
     """
-    return {"endpoints": config.endpoints}
+    async def check_endpoint(url: str):
+        try:
+            async with httpx.AsyncClient(timeout=1) as client:
+                if "/v1" in url:
+                    r = await client.get(f"{url}/models")
+                else:
+                    r = await client.get(f"{url}/api/version")
+                r.raise_for_status()
+                data = r.json()
+                if "/v1" in url:
+                    return {"url": url, "status": "ok", "version": "latest"}
+                else:
+                    return {"url": url, "status": "ok", "version": data.get("version")}
+        except Exception as exc:
+            return {"url": url, "status": "error", "detail": str(exc)}
+
+    results = await asyncio.gather(*[check_endpoint(ep) for ep in config.endpoints])
+    return {"endpoints": results}
 
 # -------------------------------------------------------------
 # 21. API route – OpenAI compatible Embedding
@@ -1093,6 +1110,10 @@ async def openai_models_proxy(request: Request):
 # -------------------------------------------------------------
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+@app.get("/favicon.ico")
+async def redirect_favicon():
+    return RedirectResponse(url="/static/favicon.ico")
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """
@@ -1102,7 +1123,48 @@ async def index(request: Request):
     return HTMLResponse(content=open("static/index.html", "r").read(), status_code=200)
 
 # -------------------------------------------------------------
-# 26. FastAPI startup event – load configuration
+# 26. Healthendpoint
+# -------------------------------------------------------------
+@app.get("/health")
+async def health_proxy(request: Request):
+    """
+    Health‑check endpoint for monitoring the proxy.
+
+    * Queries each configured endpoint for its `/api/version` response.
+    * Returns a JSON object containing:
+        - `status`: "ok" if every endpoint replied, otherwise "error".
+        - `endpoints`: a mapping of endpoint URL → `{status, version|detail}`.
+    * The HTTP status code is 200 when everything is healthy, 503 otherwise.
+    """
+    # Run all health checks in parallel
+    tasks = [
+        fetch_endpoint_details(ep, "/api/version", "version") for ep in config.endpoints
+    ]
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    health_summary = {}
+    overall_ok = True
+
+    for ep, result in zip(config.endpoints, results):
+        if isinstance(result, Exception):
+            # Endpoint did not respond / returned an error
+            health_summary[ep] = {"status": "error", "detail": str(result)}
+            overall_ok = False
+        else:
+            # Successful response – report the reported version
+            health_summary[ep] = {"status": "ok", "version": result}
+
+    response_payload = {
+        "status": "ok" if overall_ok else "error",
+        "endpoints": health_summary,
+    }
+
+    http_status = 200 if overall_ok else 503
+    return JSONResponse(content=response_payload, status_code=http_status)
+
+# -------------------------------------------------------------
+# 27. FastAPI startup event – load configuration
 # -------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event() -> None:
