@@ -67,7 +67,15 @@
   <div class="table-container">
     <h2>Running Models (PS)</h2>
     <table id="ps-table">
-      <thead><tr><th>Model</th><th>Digest</th></tr></thead>
+      <thead>
+        <tr>
+          <th>Model</th>
+          <th>Params</th>
+          <th>Quant</th>
+          <th>Ctx</th>
+          <th>Digest</th>
+        </tr>
+      </thead>
       <tbody id="ps-body">
         <tr><td colspan="2" class="loading">Loading…</td></tr>
       </tbody>
@@ -130,7 +138,7 @@ async function loadPS(){
   try{
     const data = await fetchJSON('/api/ps');
     const body = document.getElementById('ps-body');
-    body.innerHTML = data.models.map(m=>`<tr><td class="model">${m.name}</td><td>${m.digest}</td></tr>`).join('');
+    body.innerHTML = data.models.map(m=>`<tr><td class="model">${m.name}</td><td>${m.details.parameter_size}</td><td>${m.details.quantization_level}</td><td>${m.context_length}</td><td>${m.digest}</td></tr>`).join('');
   }catch(e){ console.error(e); }
 }
 
