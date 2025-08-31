@@ -118,11 +118,12 @@ async def fetch_endpoint_details(endpoint: str, route: str, detail: str) -> List
             resp = await client.get(f"{endpoint}{route}")
             resp.raise_for_status()
             data = resp.json()
-            detail = data.get(detail)
+            detail = data.get(detail, [])
             return detail
-    except Exception:
-        # If anything goes wrong we cannot reply versions
-        return {detail: "N/A"}
+    except Exception as e:
+        # If anything goes wrong we cannot reply details
+        print(e)
+        return {detail: []}
 
 def ep2base(ep):
     if "/v1" in ep:
@@ -794,7 +795,7 @@ async def ps_proxy(request: Request):
     for modellist in loaded_models:
         models['models'] += modellist
     
-    # 25. Return a JSONResponse with deduplicated currently deployed models
+    # 2. Return a JSONResponse with deduplicated currently deployed models
     return JSONResponse(
         content={"models": dedupe_on_keys(models['models'], ['digest'])},
         status_code=200,
