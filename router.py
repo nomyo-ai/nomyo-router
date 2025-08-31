@@ -120,9 +120,10 @@ async def fetch_endpoint_details(endpoint: str, route: str, detail: str) -> List
             data = resp.json()
             detail = data.get(detail)
             return detail
-    except Exception:
-        # If anything goes wrong we cannot reply versions
-        return {detail: "N/A"}
+    except Exception as e:
+        # If anything goes wrong we cannot reply details
+        print(e)
+        return {detail: ["N/A"]}
 
 def ep2base(ep):
     if "/v1" in ep:
