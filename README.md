@@ -43,7 +43,7 @@ When the request is embed(dings), chat or generate the request will be forwarded
 
 If another request for the same model config is made, NOMYO Router is aware which model runs on which Ollama server and routes the request to an Ollama server where this model is already deployed.
 
-If at the same time there are more than max concurrent connections than configured, NOMYO Router will route this request to another Ollama server for completion.
+If at the same time there are more than max concurrent connections than configured, NOMYO Router will route this request to another Ollama server serving the requested model and having the least connections for fastest completion.
 
 This way the Ollama backend servers are utilized more efficient than by simply using a wheighted, round-robin or least-connection approach.
 
