@@ -2,7 +2,7 @@
 title: NOMYO Router - an Ollama Proxy with Endpoint:Model aware routing
 author: alpha-nerd-nomyo
 author_url: https://github.com/nomyo-ai
-version: 0.1
+version: 0.2.1
 license: AGPL
 """
 # -------------------------------------------------------------
@@ -19,9 +19,9 @@ from collections import defaultdict
 # ------------------------------------------------------------------
 # In‑memory caches
 # ------------------------------------------------------------------
-# Successful results are cached for 300 s
+# Successful results are cached for 300s
 _models_cache: dict[str, tuple[Set[str], float]] = {}
-# Transient errors are cached for 30 s – the key stays until the
+# Transient errors are cached for 1s – the key stays until the
 # timeout expires, after which the endpoint will be queried again.
 _error_cache: dict[str, float] = {}
 
@@ -86,7 +86,6 @@ def get_httpx_client(endpoint: str) -> httpx.AsyncClient:
         )
     )
 
-#@cached(cache=Cache.MEMORY, ttl=300)
 async def fetch_available_models(endpoint: str) -> Set[str]:
     """
     Query <endpoint>/api/tags and return a set of all model names that the
@@ -132,7 +131,7 @@ async def fetch_available_models(endpoint: str) -> Set[str]:
             _models_cache[endpoint] = (models, time.time())
             return models
         else:
-            # Empty list – treat as “no models”, but still cache for 300 s
+            # Empty list – treat as “no models”, but still cache for 300s
             _models_cache[endpoint] = (models, time.time())
             return models
     except Exception as e:

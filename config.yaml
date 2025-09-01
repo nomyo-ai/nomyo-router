@@ -3,6 +3,8 @@ endpoints:
   - http://192.168.0.50:11434
   - http://192.168.0.51:11434
   - http://192.168.0.52:11434
+  - https://openrouter.ai/api/v1
+  - https://api.inceptionlabs.ai/v1
 
-# Maximum concurrent connections *per endpoint‑model pair*
+# Maximum concurrent connections *per endpoint‑model pair* (equals to OLLAMA_NUM_PARALLEL)
 max_concurrent_connections: 2
