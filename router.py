@@ -71,7 +71,7 @@ async def fetch_available_models(endpoint: str) -> Set[str]:
     set is returned.
     """
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=2.5) as client:
             if "/v1" in endpoint:
                 resp = await client.get(f"{endpoint}/models")
             else:
@@ -85,8 +85,9 @@ async def fetch_available_models(endpoint: str) -> Set[str]:
             else:
                 models = {m.get("name") for m in data.get("models", []) if m.get("name")}
             return models
-    except Exception:
+    except Exception as e:
         # Treat any error as if the endpoint offers no models
+        print(e)
         return set()
 
 async def fetch_loaded_models(endpoint: str) -> Set[str]:
@@ -206,14 +207,19 @@ async def choose_endpoint(model: str) -> str:
     loaded_sets = await asyncio.gather(*load_tasks)
 
     async with usage_lock:
+        # Helper: get current usage count for (endpoint, model)
+        def current_usage(ep: str) -> int:
+            return usage_counts.get(ep, {}).get(model, 0)
+        
         # 3️⃣ Endpoints that have the model loaded *and* a free slot
         loaded_and_free = [
             ep for ep, models in zip(candidate_endpoints, loaded_sets)
             if model in models and usage_counts[ep].get(model, 0) < config.max_concurrent_connections
         ]
-
+        
         if loaded_and_free:
-            return random.choice(loaded_and_free)
+            ep = min(loaded_and_free, key=current_usage)
+            return ep
 
         # 4️⃣ Endpoints among the candidates that simply have a free slot
         endpoints_with_free_slot = [
@@ -222,10 +228,12 @@ async def choose_endpoint(model: str) -> str:
         ]
 
         if endpoints_with_free_slot:
-            return random.choice(endpoints_with_free_slot)
+            ep = min(endpoints_with_free_slot, key=current_usage)
+            return ep
 
         # 5️⃣ All candidate endpoints are saturated – pick any (will queue)
-        return random.choice(candidate_endpoints)
+        ep = min(candidate_endpoints, key=current_usage)
+        return ep
 
 # -------------------------------------------------------------
 # 6. API route – Generate
