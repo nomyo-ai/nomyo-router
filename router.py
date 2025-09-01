@@ -6,7 +6,7 @@ version: 0.1
 license: AGPL
 """
 # -------------------------------------------------------------
-import json, random, asyncio, yaml, httpx, ollama, openai
+import json, time, asyncio, yaml, httpx, ollama, openai
 from pathlib import Path
 from typing import Dict, Set, List
 from fastapi import FastAPI, Request, HTTPException
@@ -15,7 +15,15 @@ from starlette.responses import StreamingResponse, JSONResponse, Response, HTMLR
 from pydantic import Field
 from pydantic_settings import BaseSettings
 from collections import defaultdict
-from aiocache import cached, Cache
+
+# ------------------------------------------------------------------
+# In‑memory caches
+# ------------------------------------------------------------------
+# Successful results are cached for 300 s
+_models_cache: dict[str, tuple[Set[str], float]] = {}
+# Transient errors are cached for 30 s – the key stays until the
+# timeout expires, after which the endpoint will be queried again.
+_error_cache: dict[str, float] = {}
 
 # -------------------------------------------------------------
 # 1. Configuration loader
@@ -61,6 +69,9 @@ usage_lock = asyncio.Lock()  # protects access to usage_counts
 # -------------------------------------------------------------
 # 4. Helperfunctions 
 # -------------------------------------------------------------
+def _is_fresh(cached_at: float, ttl: int) -> bool:
+    return (time.time() - cached_at) < ttl
+
 def get_httpx_client(endpoint: str) -> httpx.AsyncClient:
     """
     Use persistent connections to request endpoint info for reliable results
@@ -75,7 +86,7 @@ def get_httpx_client(endpoint: str) -> httpx.AsyncClient:
         )
     )
 
-@cached(cache=Cache.MEMORY, ttl=300)
+#@cached(cache=Cache.MEMORY, ttl=300)
 async def fetch_available_models(endpoint: str) -> Set[str]:
     """
     Query <endpoint>/api/tags and return a set of all model names that the
@@ -86,6 +97,22 @@ async def fetch_available_models(endpoint: str) -> Set[str]:
     If the request fails (e.g. timeout, 5xx, or malformed response), an empty
     set is returned.
     """
+    if endpoint in _models_cache:
+        models, cached_at = _models_cache[endpoint]
+        if _is_fresh(cached_at, 300):
+            return models
+        else:
+            # stale entry – drop it
+            del _models_cache[endpoint]
+
+    if endpoint in _error_cache:
+        if _is_fresh(_error_cache[endpoint], 1):
+            # Still within the short error TTL – pretend nothing is available
+            return set()
+        else:
+            # Error expired – remove it
+            del _error_cache[endpoint]
+
     client = get_httpx_client(endpoint)
     try:
         if "/v1" in endpoint:
@@ -100,10 +127,18 @@ async def fetch_available_models(endpoint: str) -> Set[str]:
             models = {m.get("id") for m in data.get("data", []) if m.get("name")}
         else:
             models = {m.get("name") for m in data.get("models", []) if m.get("name")}
-        return models
+
+        if models:
+            _models_cache[endpoint] = (models, time.time())
+            return models
+        else:
+            # Empty list – treat as “no models”, but still cache for 300 s
+            _models_cache[endpoint] = (models, time.time())
+            return models
     except Exception as e:
         # Treat any error as if the endpoint offers no models
-        print(e)
+        print(f"[fetch_available_models] {endpoint} error: {e}")
+        _error_cache[endpoint] = time.time()
         return set()
 
 
@@ -131,13 +166,13 @@ async def fetch_endpoint_details(endpoint: str, route: str, detail: str) -> List
     Query <endpoint>/<route> to fetch <detail> and return a List of dicts with details
     for the corresponding Ollama endpoint. If the request fails we respond with "N/A" for detail.
     """
+    client = get_httpx_client(endpoint)
     try:
-        async with httpx.AsyncClient(timeout=1.0) as client:
-            resp = await client.get(f"{endpoint}{route}")
-            resp.raise_for_status()
-            data = resp.json()
-            detail = data.get(detail, [])
-            return detail
+        resp = await client.get(f"{route}")
+        resp.raise_for_status()
+        data = resp.json()
+        detail = data.get(detail, [])
+        return detail
     except Exception as e:
         # If anything goes wrong we cannot reply details
         print(e)
