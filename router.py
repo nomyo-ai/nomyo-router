@@ -1161,6 +1161,9 @@ async def openai_models_proxy(request: Request):
     
     models = {'data': []}
     for modellist in all_models:
+        for model in modellist:
+            if not id in model.keys():  # Relable Ollama models with OpenAI Model.id from Model.name
+                model['id'] = model['name']
         models['data'] += modellist
     
     # 2. Return a JSONResponse with a deduplicated list of unique models for inference
