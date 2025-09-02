@@ -130,7 +130,7 @@ async function loadTags(){
   try{
     const data = await fetchJSON('/api/tags');
     const body = document.getElementById('tags-body');
-    body.innerHTML = data.models.map(m=>`<tr><td class="model">${m.name}</td><td>${m.digest}</td></tr>`).join('');
+    body.innerHTML = data.models.map(m=>`<tr><td class="model">${m.id || m.name}</td><td>${m.digest}</td></tr>`).join('');
   }catch(e){ console.error(e); }
 }
 
