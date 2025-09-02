@@ -917,6 +917,10 @@ async def openai_embedding_proxy(request: Request):
         model = payload.get("model")
         input = payload.get("input")
         
+        headers = request.headers
+        api_key = headers.get("Authorization")
+        api_key = api_key.split()[1]
+
         if not model:
             raise HTTPException(
                 status_code=400, detail="Missing required field 'model'"
@@ -931,7 +935,7 @@ async def openai_embedding_proxy(request: Request):
     # 2. Endpoint logic
     endpoint = await choose_endpoint(model)
     await increment_usage(endpoint, model)
-    oclient = openai.AsyncOpenAI(base_url=endpoint+"/v1", api_key="ollama")
+    oclient = openai.AsyncOpenAI(base_url=endpoint+"/v1", api_key=api_key)
 
     # 3. Async generator that streams embedding data and decrements the counter
     async_gen = await oclient.embeddings.create(input = [input], model=model)
