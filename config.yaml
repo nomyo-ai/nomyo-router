@@ -3,6 +3,15 @@ endpoints:
   - http://192.168.0.50:11434
   - http://192.168.0.51:11434
   - http://192.168.0.52:11434
+  - https://openrouter.ai/api/v1
+  - https://api.openai.com/v1
 
 # Maximum concurrent connections *per endpoint‑model pair* (equals to OLLAMA_NUM_PARALLEL)
 max_concurrent_connections: 2
+
+# API keys for remote endpoints
+# Set an environment variable like OPENAI_KEY
+# Confirm endpoints are exactly as in endpoints block
+api_keys:
+  "https://openrouter.ai/api/v1": "${OPENROUTER_KEY}"
+  "https://api.openai.com/v1": "${OPENAI_KEY}"
