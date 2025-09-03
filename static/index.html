@@ -55,7 +55,7 @@
 
 <div class="tables-wrapper">
   <div class="table-container">
-    <h2>Available Models (Tags)</h2>
+    <h2><span id="tags-count"></span> Available Models (Tags)</h2>
     <table id="tags-table">
       <thead><tr><th>Model</th><th>Digest</th></tr></thead>
       <tbody id="tags-body">
@@ -131,6 +131,8 @@ async function loadTags(){
     const data = await fetchJSON('/api/tags');
     const body = document.getElementById('tags-body');
     body.innerHTML = data.models.map(m=>`<tr><td class="model">${m.id || m.name}</td><td>${m.digest}</td></tr>`).join('');
+    const countSpan = document.getElementById('tags-count');
+    countSpan.textContent = `${data.models.length}`;
   }catch(e){ console.error(e); }
 }
 
