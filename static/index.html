@@ -14,11 +14,16 @@
   .model{font-family:monospace;}
   .loading{color:#999;}
 
-  /* NEW STYLES */
   .tables-wrapper{
     display:flex;
     gap:1rem;
     margin-top:1rem;
+  }
+  .header-pull-wrapper {
+    display: flex;            /* horizontal layout */
+    align-items: center;      /* vertical centering */
+    gap: 1rem;                /* space between title & form */
+    flex-wrap: wrap;          /* optional – keeps it tidy on very narrow screens */
   }
   .table-container{
     width:50%;
@@ -54,8 +59,31 @@
     color:#0066cc;
     cursor:pointer;
     text-decoration:underline;
+    float: right;
   }
+  .delete-link{
+  font-size:0.9em;
+  margin-left:0.5em;
+  color:#b22222;      /* dark red */
+  cursor:pointer;
+  text-decoration:underline;
+  float: right;
+  }
+  .show-link {
+  font-size:0.9em;
+  margin-left:0.5em;
+  color:#0066cc;
+  cursor:pointer;
+  text-decoration:underline;
+  float: right;
+  }
+  .delete-link:hover{ text-decoration:none; }
   .copy-link:hover { text-decoration:none; }
+  /* modal.css – very lightweight – feel free to replace with Bootstrap/Material UI */
+  .modal { display:none; position:fixed; top:0; left:0; width:100%; height:100%;
+          background:rgba(0,0,0,.6); align-items:center; justify-content:center; }
+  .modal-content { background:#fff; padding:1rem; max-width:90%; max-height:90%; overflow:auto; }
+  .close-btn { float:right; cursor:pointer; font-size:1.5rem; }
 </style>
 </head>
 <body>
@@ -63,7 +91,14 @@
 
 <div class="tables-wrapper">
   <div class="table-container">
+    <div class="header-pull-wrapper">
     <h2><span id="tags-count"></span> Available Models (Tags)</h2>
+    <div id="pull-section">
+      <label for="pull-model-input">Pull a model:</label>
+      <input type="text" id="pull-model-input" placeholder="llama3:latest" />
+      <button id="pull-btn">Pull</button>
+      <span id="pull-status" style="margin-left:0.5rem; color:green;"></span>
+    </div></div>
     <table id="tags-table">
       <thead><tr><th>Model</th><th>Digest</th></tr></thead>
       <tbody id="tags-body">
@@ -141,7 +176,13 @@ async function loadTags(){
     body.innerHTML = data.models.map(m => {
       // Build the model cell
       let modelCell = `${m.id || m.name}`;
-
+      // Add delete link only when a digest exists
+      if (m.digest) {
+        modelCell += `
+          <a href="#" class="delete-link" data-model="${m.name}">
+            delete
+          </a>`;
+      }
       // Add the copy link *only if a digest exists*
       if (m.digest) {
         modelCell += `
@@ -149,7 +190,12 @@ async function loadTags(){
             copy
           </a>`;
       }
-
+      if (m.digest) {
+        modelCell += `
+          <a href="#" class="show-link" data-model="${m.name}">
+            show
+          </a>`;
+      }
       return `
         <tr>
           <td class="model">${modelCell}</td>
@@ -157,7 +203,6 @@ async function loadTags(){
         </tr>`;
     }).join('');    const countSpan = document.getElementById('tags-count');
     countSpan.textContent = `${data.models.length}`;
-     // Attach copy‑link handlers
     document.querySelectorAll('.copy-link').forEach(link => {
       link.addEventListener('click', async (e) => {
         e.preventDefault();
@@ -165,15 +210,105 @@ async function loadTags(){
         const dest = prompt(`Enter destination for ${source}:`);
         if (!dest) return; // cancel if empty
         try{
-          const resp = await fetch(`/api/copy?source=${encodeURIComponent(source)}&destination=${encodeURIComponent(dest)}`);
+          const resp = await fetch(
+            `/api/copy?source=${encodeURIComponent(source)}&destination=${encodeURIComponent(dest)}`,
+            {method: 'POST'}
+          );
           if (!resp.ok) throw new Error(`Copy failed: ${resp.status}`);
           alert(`Copied ${source} to ${dest} successfully.`);
+
+          loadTags();
         }catch(err){
           console.error(err);
           alert(`Error copying ${source} to ${dest}: ${err}`);
         }
       });
     });
+    document.querySelectorAll('.delete-link').forEach(link => {
+      link.addEventListener('click', async e => {
+        e.preventDefault();
+        const model = link.dataset.model;
+
+        const ok = confirm(`Delete the model “${model}”? This cannot be undone.`);
+        if (!ok) return;
+
+        try {
+          const resp = await fetch(
+            `/api/delete?model=${encodeURIComponent(model)}`,
+            {method: 'DELETE'}
+          );
+          if (!resp.ok) throw new Error(`Delete failed: ${resp.status}`);
+          alert(`Model “${model}” deleted successfully.`);
+
+          loadTags();
+        } catch (err) {
+          console.error(err);
+          alert(`Error deleting ${model}: ${err}`);
+        }
+      });
+    });
+    document.body.addEventListener('click', async e => {
+    if (!e.target.matches('.show-link')) return;
+
+    e.preventDefault();
+    const model = e.target.dataset.model;
+
+    try {
+      const resp = await fetch(
+        `/api/show?model=${encodeURIComponent(model)}`,
+        {method: 'POST'}
+      );
+      if (!resp.ok) throw new Error(`Status ${resp.status}`);
+      const data = await resp.json();
+
+      const jsonText = JSON.stringify(data, null, 2)
+      .replace(/\\n/g, '\n');
+
+      document.getElementById('json-output').textContent = jsonText;
+      document.getElementById('show-modal').style.display = 'flex';
+    } catch (err) {
+      console.error(err);
+      alert(`Could not load model details: ${err.message}`);
+    }
+  });
+
+  document.getElementById('pull-btn').addEventListener('click', async () => {
+  const model = document.getElementById('pull-model-input').value.trim();
+  const statusEl = document.getElementById('pull-status');
+
+  if (!model) {
+    alert('Please enter a model name.');
+    return;
+  }
+
+  try {
+    const resp = await fetch(
+      `/api/pull?model=${encodeURIComponent(model)}`,
+      {method: 'POST'}
+    );
+
+    if (!resp.ok) throw new Error(`Status ${resp.status}`);
+    const data = await resp.json();
+
+    statusEl.textContent = `✅ ${JSON.stringify(data, null, 2)}`;
+    statusEl.style.color = 'green';
+
+    // Optional: refresh the tags list so the new model appears
+    loadTags();
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = `❌ ${err.message}`;
+    statusEl.style.color = 'red';
+  }
+});
+
+  
+  const modal = document.getElementById('show-modal');
+  modal.addEventListener('click', e => {
+    if (e.target === modal || e.target.matches('.close-btn')) {
+      modal.style.display = 'none';
+    }
+  });
   }catch(e){ console.error(e); }
 }
 
@@ -190,6 +325,19 @@ window.addEventListener('load', ()=>{
   loadTags();
   loadPS();
 });
+setInterval(() => {
+  loadTags();
+}, 600_000);
+setInterval(() => {
+  loadPS();
+}, 60_000);
 </script>
+<div id="show-modal" class="modal">
+  <div class="modal-content">
+    <span class="close-btn">&times;</span>
+    <h2>Model details</h2>
+    <pre id="json-output"></pre>
+  </div>
+</div>
 </body>
 </html>

@@ -619,16 +619,17 @@ async def create_proxy(request: Request):
 # 11. API route – Show
 # -------------------------------------------------------------
 @app.post("/api/show")
-async def show_proxy(request: Request):
+async def show_proxy(request: Request, model: Optional[str] = None):
     """
     Proxy a model show request to Ollama and reply with ShowResponse.
 
     """
     try:
         body_bytes = await request.body()
-        payload = json.loads(body_bytes.decode("utf-8"))
 
-        model = payload.get("model")
+        if not model:
+            payload = json.loads(body_bytes.decode("utf-8"))
+            model = payload.get("model")
         
         if not model:
             raise HTTPException(
@@ -652,7 +653,7 @@ async def show_proxy(request: Request):
 # 12. API route – Copy
 # -------------------------------------------------------------
 @app.post("/api/copy")
-async def copy_proxy(request: Request):
+async def copy_proxy(request: Request, source: Optional[str] = None, destination: Optional[str] = None):
     """
     Proxy a model copy request to each Ollama endpoint and reply with Status Code.
 
@@ -660,10 +661,14 @@ async def copy_proxy(request: Request):
     # 1. Parse and validate request
     try:
         body_bytes = await request.body()
-        payload = json.loads(body_bytes.decode("utf-8"))
 
-        src = payload.get("source")
-        dst = payload.get("destination")
+        if not source and not destination:
+            payload = json.loads(body_bytes.decode("utf-8"))
+            src = payload.get("source")
+            dst = payload.get("destination")
+        else:
+            src = source
+            dst = destination
         
         if not src:
             raise HTTPException(
@@ -688,35 +693,11 @@ async def copy_proxy(request: Request):
     # 4. Return with 200 OK if all went well, 404 if a single endpoint failed
     return Response(status_code=404 if 404 in status_list else 200)
 
-@app.get("/api/copy")
-async def copy_proxy_from_dashboard(source: str, destination: str):
-    """
-    Proxy a model copy request to each Ollama endpoint and reply with a status code.
-    Accepts `source` and `destination` exclusively as query‑string parameters.
-    """
-    # 1. Validate that both values are non‑empty strings (FastAPI already guarantees presence)
-    if not source:
-        raise HTTPException(status_code=400, detail="Missing required query parameter 'source'")
-    if not destination:
-        raise HTTPException(status_code=400, detail="Missing required query parameter 'destination'")
-
-    # 2. Iterate over all endpoints to copy the model on each endpoint
-    status_list = []
-    for endpoint in config.endpoints:
-        if "/v1" not in endpoint:
-            client = ollama.AsyncClient(host=endpoint)
-            # 3. Proxy a simple copy request
-            copy = await client.copy(source=source, destination=destination)
-            status_list.append(copy.status)
-
-    # 4. Return with 200 OK if all went well, 404 if any endpoint failed
-    return Response(status_code=404 if 404 in status_list else 200)
-
 # -------------------------------------------------------------
 # 13. API route – Delete
 # -------------------------------------------------------------
 @app.delete("/api/delete")
-async def delete_proxy(request: Request):
+async def delete_proxy(request: Request, model: Optional[str] = None):
     """
     Proxy a model delete request to each Ollama endpoint and reply with Status Code.
 
@@ -724,9 +705,10 @@ async def delete_proxy(request: Request):
     # 1. Parse and validate request
     try:
         body_bytes = await request.body()
-        payload = json.loads(body_bytes.decode("utf-8"))
 
-        model = payload.get("model")
+        if not model:
+            payload = json.loads(body_bytes.decode("utf-8"))
+            model = payload.get("model")
         
         if not model:
             raise HTTPException(
@@ -745,30 +727,26 @@ async def delete_proxy(request: Request):
             status_list.append(copy.status)
     
     # 4. Retrun 200 0K, if a single enpoint fails, respond with 404
-    if 404 in status_list:
-        return Response(
-            status_code=404
-        )
-    else:
-        return Response(
-            status_code=200
-        )    
+    return Response(status_code=404 if 404 in status_list else 200)   
 
 # -------------------------------------------------------------
 # 14. API route – Pull
 # -------------------------------------------------------------
 @app.post("/api/pull")
-async def pull_proxy(request: Request):
+async def pull_proxy(request: Request, model: Optional[str] = None):
     """
     Proxy a pull request to all Ollama endpoint and report status back.
     """
     # 1. Parse and validate request
     try:
         body_bytes = await request.body()
-        payload = json.loads(body_bytes.decode("utf-8"))
 
-        model = payload.get("model")
-        insecure = payload.get("insecure")
+        if not model:
+            payload = json.loads(body_bytes.decode("utf-8"))
+            model = payload.get("model")
+            insecure = payload.get("insecure")
+        else:
+            insecure = None
 
         if not model:
             raise HTTPException(
@@ -780,10 +758,11 @@ async def pull_proxy(request: Request):
     # 2. Iterate over all endpoints to pull the model
     status_list = []
     for endpoint in config.endpoints:
-        client = ollama.AsyncClient(host=endpoint)
-        # 3. Proxy a simple pull request
-        pull = await client.pull(model=model, insecure=insecure, stream=False)
-        status_list.append(pull)
+        if "/v1" not in endpoint:
+            client = ollama.AsyncClient(host=endpoint)
+            # 3. Proxy a simple pull request
+            pull = await client.pull(model=model, insecure=insecure, stream=False)
+            status_list.append(pull)
 
     combined_status = []
     for status in status_list:
