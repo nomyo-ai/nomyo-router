@@ -2,7 +2,7 @@
 
 is a transparent proxy for [Ollama](https://github.com/ollama/ollama) with model deployment aware routing.
 
-<img width="2490" height="1298" alt="Screenshot_NOMYO_Router_Dashboard" src="https://github.com/user-attachments/assets/ba0518d4-d4e3-4cb0-a7de-377df8e6370c" /><br>
+<img width="2490" height="1298" alt="Screenshot_NOMYO_Router_0-2-2_Dashboard" src="https://github.com/user-attachments/assets/ddacdf88-e3f3-41dd-8be6-f165b22d9879" /><br>
 
 It runs between your frontend application and Ollama backend and is transparent for both, the front- and backend.
 
