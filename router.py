@@ -679,20 +679,38 @@ async def copy_proxy(request: Request):
     # 3. Iterate over all endpoints to copy the model on each endpoint
     status_list = []
     for endpoint in config.endpoints:
-        client = ollama.AsyncClient(host=endpoint)
-        # 4. Proxy a simple copy request
-        copy = await client.copy(source=src, destination=dst)
-        status_list.append(copy.status)
+        if "/v1" not in endpoint:
+            client = ollama.AsyncClient(host=endpoint)
+            # 4. Proxy a simple copy request
+            copy = await client.copy(source=src, destination=dst)
+            status_list.append(copy.status)
 
     # 4. Return with 200 OK if all went well, 404 if a single endpoint failed
-    if 404 in status_list:
-        return Response(
-            status_code=404
-        )
-    else:
-        return Response(
-            status_code=200
-        )    
+    return Response(status_code=404 if 404 in status_list else 200)
+
+@app.get("/api/copy")
+async def copy_proxy_from_dashboard(source: str, destination: str):
+    """
+    Proxy a model copy request to each Ollama endpoint and reply with a status code.
+    Accepts `source` and `destination` exclusively as query‑string parameters.
+    """
+    # 1. Validate that both values are non‑empty strings (FastAPI already guarantees presence)
+    if not source:
+        raise HTTPException(status_code=400, detail="Missing required query parameter 'source'")
+    if not destination:
+        raise HTTPException(status_code=400, detail="Missing required query parameter 'destination'")
+
+    # 2. Iterate over all endpoints to copy the model on each endpoint
+    status_list = []
+    for endpoint in config.endpoints:
+        if "/v1" not in endpoint:
+            client = ollama.AsyncClient(host=endpoint)
+            # 3. Proxy a simple copy request
+            copy = await client.copy(source=source, destination=destination)
+            status_list.append(copy.status)
+
+    # 4. Return with 200 OK if all went well, 404 if any endpoint failed
+    return Response(status_code=404 if 404 in status_list else 200)
 
 # -------------------------------------------------------------
 # 13. API route – Delete
@@ -720,10 +738,11 @@ async def delete_proxy(request: Request):
     # 2. Iterate over all endpoints to delete the model on each endpoint
     status_list = []
     for endpoint in config.endpoints:
-        client = ollama.AsyncClient(host=endpoint)
-        # 3. Proxy a simple copy request
-        copy = await client.delete(model=model)
-        status_list.append(copy.status)
+        if "/v1" not in endpoint:
+            client = ollama.AsyncClient(host=endpoint)
+            # 3. Proxy a simple copy request
+            copy = await client.delete(model=model)
+            status_list.append(copy.status)
     
     # 4. Retrun 200 0K, if a single enpoint fails, respond with 404
     if 404 in status_list:
@@ -1005,7 +1024,6 @@ async def openai_chat_completions_proxy(request: Request):
         params = {
             "messages": messages, 
             "model": model,
-            "seed": seed, 
             "stop": stop,
             "stream": stream,
         }
@@ -1024,6 +1042,8 @@ async def openai_chat_completions_proxy(request: Request):
             params["temperature"] = temperature
         if top_p is not None:
             params["top_p"] = top_p
+        if seed is not None:
+            params["seed"] = seed
         if presence_penalty is not None:
             params["presence_penalty"] = presence_penalty
         if frequency_penalty is not None:

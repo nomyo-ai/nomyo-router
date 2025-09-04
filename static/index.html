@@ -46,8 +46,16 @@
     }
   }
   /* Add a tiny status‑style section */
-.status-ok   { color: #006400; font-weight: bold; }   /* dark green */
-.status-error{ color: #8B0000; font-weight: bold; }   /* dark red */
+  .status-ok   { color: #006400; font-weight: bold; }   /* dark green */
+  .status-error{ color: #8B0000; font-weight: bold; }   /* dark red */
+  .copy-link {
+    font-size:0.9em;
+    margin-left:0.5em;
+    color:#0066cc;
+    cursor:pointer;
+    text-decoration:underline;
+  }
+  .copy-link:hover { text-decoration:none; }
 </style>
 </head>
 <body>
@@ -130,9 +138,42 @@ async function loadTags(){
   try{
     const data = await fetchJSON('/api/tags');
     const body = document.getElementById('tags-body');
-    body.innerHTML = data.models.map(m=>`<tr><td class="model">${m.id || m.name}</td><td>${m.digest}</td></tr>`).join('');
-    const countSpan = document.getElementById('tags-count');
+    body.innerHTML = data.models.map(m => {
+      // Build the model cell
+      let modelCell = `${m.id || m.name}`;
+
+      // Add the copy link *only if a digest exists*
+      if (m.digest) {
+        modelCell += `
+          <a href="#" class="copy-link" data-source="${m.name}">
+            copy
+          </a>`;
+      }
+
+      return `
+        <tr>
+          <td class="model">${modelCell}</td>
+          <td>${m.digest || ''}</td>
+        </tr>`;
+    }).join('');    const countSpan = document.getElementById('tags-count');
     countSpan.textContent = `${data.models.length}`;
+     // Attach copy‑link handlers
+    document.querySelectorAll('.copy-link').forEach(link => {
+      link.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const source = link.dataset.source;
+        const dest = prompt(`Enter destination for ${source}:`);
+        if (!dest) return; // cancel if empty
+        try{
+          const resp = await fetch(`/api/copy?source=${encodeURIComponent(source)}&destination=${encodeURIComponent(dest)}`);
+          if (!resp.ok) throw new Error(`Copy failed: ${resp.status}`);
+          alert(`Copied ${source} to ${dest} successfully.`);
+        }catch(err){
+          console.error(err);
+          alert(`Error copying ${source} to ${dest}: ${err}`);
+        }
+      });
+    });
   }catch(e){ console.error(e); }
 }
 
