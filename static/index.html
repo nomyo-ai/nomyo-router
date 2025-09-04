@@ -5,108 +5,75 @@
 <title>NOMYO Router Dashboard</title>
 <style>
   body{font-family:Arial,Helvetica,sans-serif;background:#f7f7f7;color:#333;padding:20px;}
-  h1{margin-top:0;}
-  table{border-collapse:collapse;width:100%;margin-bottom:20px;}
-  th,td{border:1px solid #ddd;padding:8px;}
-  th{background:#333;color:#fff;}
-  tr:nth-child(even){background:#f2f2f2;}
-  .endpoint{font-weight:bold;}
-  .model{font-family:monospace;}
-  .loading{color:#999;}
-
-  .tables-wrapper{
-    display:flex;
-    gap:1rem;
-    margin-top:1rem;
-  }
-  .header-pull-wrapper {
-    display: flex;            /* horizontal layout */
-    align-items: center;      /* vertical centering */
-    gap: 1rem;                /* space between title & form */
-    flex-wrap: wrap;          /* optional – keeps it tidy on very narrow screens */
-  }
-  .table-container{
-    width:50%;
-  }
-  /* Ensure the heading aligns nicely inside each container */
-  .table-container h2{
-    margin:0 0 0.5rem 0;
-  }
-  /* ---- NEW STYLES FOR PORTRAIT (height > width) ---- */
-  @media (orientation: portrait) {
-    /* Stack the two tables vertically */
+  h2 {margin: 0;}
+  .tables-wrapper{display:flex;gap:2rem;}
+  .table-container{flex:1;min-width:350px;background:#fff;padding:1rem;border-radius:6px;}
+  /* ---------- Header + Pull form ---------- */
+  .header-pull-wrapper{display:flex;flex-direction:row;align-items:center;gap:1rem;margin-bottom:0;}
+  #pull-section{display:flex;align-items:center;}
+  #pull-section input{flex:1;padding:0;margin-right:0.5rem;}
+  #pull-section button{padding:0 0;}
+  #pull-status{margin-left:0.5rem; font-weight:bold;}
+  /* ---------- Tables ---------- */
+  table{width:100%;border-collapse:collapse;margin-top:1rem;}
+  th,td{border:1px solid #ddd;padding:0.5rem;text-align:left;}
+  th{background:#e0e0e0;}
+  .loading{color:#777;font-style:italic;}
+  .status-ok{color:#006400;font-weight:bold;}
+  .status-error{color:#8B0000;font-weight:bold;}
+  .copy-link,.delete-link,.show-link{font-size:0.9em;margin-left:0.5em;cursor:pointer;text-decoration:underline;float:right;}
+  .delete-link{color:#b22222;}
+  .copy-link,.show-link{color:#0066cc;}
+  .delete-link:hover,.copy-link:hover,.show-link:hover{text-decoration:none;}
+  /* ---------- Modal ---------- */
+  .modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.6);align-items:center;justify-content:center;}
+  .modal-content{background:#fff;padding:1rem;max-width:90%;max-height:90%;overflow:auto;border-radius:6px;}
+  .close-btn{float:right;cursor:pointer;font-size:1.5rem;}
+  /* ---------- Usage Chart ---------- */
+  .usage-chart{margin-top:20px;}
+  .endpoint-bar{margin-bottom:12px;}
+  .endpoint-label{font-weight:bold;margin-bottom:4px;}
+  .bar{display:flex;height:16px;background:#e0e0e0;border-radius:4px;overflow:hidden;}
+  .segment{height:100%;color:white;font-size:12px;font-weight: bolder;display:flex;align-items:center;justify-content:center;white-space:nowrap;}
+  .table-container {padding-top:1rem;}
+    /* ---------- Responsive reorder ---------- */
+  @media (max-aspect-ratio: 1/1) {
     .tables-wrapper {
-      flex-direction: column;          /* instead of the default row */
+      flex-direction: column;
     }
-    .table-container {
-      width: 100%;                     /* full width when stacked */
+    .tables-wrapper > .table-container:nth-child(1) { /* Tags container */
+      order: 2;
     }
-    /* Put the “Running Models” table first */
-    .table-container:nth-child(2) {    /* the PS table is the 2nd child */
-      order: -1;
-    }
-    /* Keep the other table after it (default order 0) */
-    .table-container:nth-child(1) {
-      order: 0;
+    .tables-wrapper > .table-container:nth-child(2) { /* PS container */
+      order: 1;
     }
   }
-  /* Add a tiny status‑style section */
-  .status-ok   { color: #006400; font-weight: bold; }   /* dark green */
-  .status-error{ color: #8B0000; font-weight: bold; }   /* dark red */
-  .copy-link {
-    font-size:0.9em;
-    margin-left:0.5em;
-    color:#0066cc;
-    cursor:pointer;
-    text-decoration:underline;
-    float: right;
-  }
-  .delete-link{
-  font-size:0.9em;
-  margin-left:0.5em;
-  color:#b22222;      /* dark red */
-  cursor:pointer;
-  text-decoration:underline;
-  float: right;
-  }
-  .show-link {
-  font-size:0.9em;
-  margin-left:0.5em;
-  color:#0066cc;
-  cursor:pointer;
-  text-decoration:underline;
-  float: right;
-  }
-  .delete-link:hover{ text-decoration:none; }
-  .copy-link:hover { text-decoration:none; }
-  /* modal.css – very lightweight – feel free to replace with Bootstrap/Material UI */
-  .modal { display:none; position:fixed; top:0; left:0; width:100%; height:100%;
-          background:rgba(0,0,0,.6); align-items:center; justify-content:center; }
-  .modal-content { background:#fff; padding:1rem; max-width:90%; max-height:90%; overflow:auto; }
-  .close-btn { float:right; cursor:pointer; font-size:1.5rem; }
 </style>
 </head>
 <body>
-<a href="https://www.nomyo.ai" target="_blank"><img src="./static/228394408.png" width="100px" height="100px"></a><h1>Router Dashboard</h1>
+<a href="https://www.nomyo.ai" target="_blank"><img src="./static/228394408.png" width="100px" height="100px"></a>
+<h1>Router Dashboard</h1>
 
 <div class="tables-wrapper">
+  <!-- ---------- Tags ---------- -->
   <div class="table-container">
     <div class="header-pull-wrapper">
-    <h2><span id="tags-count"></span> Available Models (Tags)</h2>
-    <div id="pull-section">
-      <label for="pull-model-input">Pull a model:</label>
-      <input type="text" id="pull-model-input" placeholder="llama3:latest" />
-      <button id="pull-btn">Pull</button>
-      <span id="pull-status" style="margin-left:0.5rem; color:green;"></span>
-    </div></div>
+      <h2><span id="tags-count"></span> Available Models (Tags)</h2>
+      <div id="pull-section">
+        <label for="pull-model-input">Pull a model:</label>
+        <input type="text" id="pull-model-input" placeholder="llama3:latest" />
+        <button id="pull-btn">Pull</button>
+        <span id="pull-status"></span>
+      </div>
+    </div>
+
     <table id="tags-table">
       <thead><tr><th>Model</th><th>Digest</th></tr></thead>
-      <tbody id="tags-body">
-        <tr><td colspan="2" class="loading">Loading…</td></tr>
-      </tbody>
+      <tbody id="tags-body"><tr><td colspan="2" class="loading">Loading…</td></tr></tbody>
     </table>
   </div>
 
+  <!-- ---------- PS + Usage Chart ---------- -->
   <div class="table-container">
     <h2>Running Models (PS)</h2>
     <table id="ps-table">
@@ -119,10 +86,11 @@
           <th>Digest</th>
         </tr>
       </thead>
-      <tbody id="ps-body">
-        <tr><td colspan="2" class="loading">Loading…</td></tr>
-      </tbody>
+      <tbody id="ps-body"><tr><td colspan="5" class="loading">Loading…</td></tr></tbody>
     </table>
+
+    <!-- ------------- Usage Chart ------------- -->
+    <div id="usage-chart" class="usage-chart"></div>
   </div>
 </div>
 
@@ -135,23 +103,22 @@
       <th>Version</th>
     </tr>
   </thead>
-  <tbody id="endpoints-body">
-    <tr><td colspan="3" class="loading">Loading…</td></tr>
-  </tbody>
+  <tbody id="endpoints-body"><tr><td colspan="3" class="loading">Loading…</td></tr></tbody>
 </table>
 
 <script>
+/* ---------- Utility ---------- */
 async function fetchJSON(url){
   const resp = await fetch(url);
   if(!resp.ok){ throw new Error(`Failed ${url}: ${resp.status}`); }
   return await resp.json();
 }
 
+/* ---------- Endpoints ---------- */
 async function loadEndpoints(){
   try{
     const data = await fetchJSON('/api/config');
     const body = document.getElementById('endpoints-body');
-    // Map each endpoint object to a table row
     body.innerHTML = data.endpoints.map(e => {
       const statusClass = e.status === 'ok' ? 'status-ok' : 'status-error';
       const version = e.version || 'N/A';
@@ -169,54 +136,37 @@ async function loadEndpoints(){
   }
 }
 
+/* ---------- Tags ---------- */
 async function loadTags(){
   try{
     const data = await fetchJSON('/api/tags');
     const body = document.getElementById('tags-body');
     body.innerHTML = data.models.map(m => {
-      // Build the model cell
       let modelCell = `${m.id || m.name}`;
-      // Add delete link only when a digest exists
       if (m.digest) {
-        modelCell += `
-          <a href="#" class="delete-link" data-model="${m.name}">
-            delete
-          </a>`;
-      }
-      // Add the copy link *only if a digest exists*
-      if (m.digest) {
-        modelCell += `
-          <a href="#" class="copy-link" data-source="${m.name}">
-            copy
-          </a>`;
-      }
-      if (m.digest) {
-        modelCell += `
-          <a href="#" class="show-link" data-model="${m.name}">
-            show
-          </a>`;
+        modelCell += `<a href="#" class="delete-link" data-model="${m.name}">delete</a>`;
+        modelCell += `<a href="#" class="copy-link" data-source="${m.name}">copy</a>`;
+        modelCell += `<a href="#" class="show-link" data-model="${m.name}">show</a>`;
       }
       return `
         <tr>
           <td class="model">${modelCell}</td>
           <td>${m.digest || ''}</td>
         </tr>`;
-    }).join('');    const countSpan = document.getElementById('tags-count');
-    countSpan.textContent = `${data.models.length}`;
+    }).join('');
+    document.getElementById('tags-count').textContent = `${data.models.length}`;
+
+    /* copy logic */
     document.querySelectorAll('.copy-link').forEach(link => {
       link.addEventListener('click', async (e) => {
         e.preventDefault();
         const source = link.dataset.source;
         const dest = prompt(`Enter destination for ${source}:`);
-        if (!dest) return; // cancel if empty
+        if (!dest) return;
         try{
-          const resp = await fetch(
-            `/api/copy?source=${encodeURIComponent(source)}&destination=${encodeURIComponent(dest)}`,
-            {method: 'POST'}
-          );
+          const resp = await fetch(`/api/copy?source=${encodeURIComponent(source)}&destination=${encodeURIComponent(dest)}`,{method:'POST'});
           if (!resp.ok) throw new Error(`Copy failed: ${resp.status}`);
           alert(`Copied ${source} to ${dest} successfully.`);
-
           loadTags();
         }catch(err){
           console.error(err);
@@ -224,22 +174,18 @@ async function loadTags(){
         }
       });
     });
+
+    /* delete logic */
     document.querySelectorAll('.delete-link').forEach(link => {
       link.addEventListener('click', async e => {
         e.preventDefault();
         const model = link.dataset.model;
-
         const ok = confirm(`Delete the model “${model}”? This cannot be undone.`);
         if (!ok) return;
-
         try {
-          const resp = await fetch(
-            `/api/delete?model=${encodeURIComponent(model)}`,
-            {method: 'DELETE'}
-          );
+          const resp = await fetch(`/api/delete?model=${encodeURIComponent(model)}`,{method:'DELETE'});
           if (!resp.ok) throw new Error(`Delete failed: ${resp.status}`);
           alert(`Model “${model}” deleted successfully.`);
-
           loadTags();
         } catch (err) {
           console.error(err);
@@ -247,71 +193,55 @@ async function loadTags(){
         }
       });
     });
+
+    /* show logic */
     document.body.addEventListener('click', async e => {
-    if (!e.target.matches('.show-link')) return;
+      if (!e.target.matches('.show-link')) return;
+      e.preventDefault();
+      const model = e.target.dataset.model;
+      try {
+        const resp = await fetch(`/api/show?model=${encodeURIComponent(model)}`,{method:'POST'});
+        if (!resp.ok) throw new Error(`Status ${resp.status}`);
+        const data = await resp.json();
+        document.getElementById('json-output').textContent = JSON.stringify(data, null, 2);
+        document.getElementById('show-modal').style.display = 'flex';
+      } catch (err) {
+        console.error(err);
+        alert(`Could not load model details: ${err.message}`);
+      }
+    });
 
-    e.preventDefault();
-    const model = e.target.dataset.model;
+    /* pull logic */
+    document.getElementById('pull-btn').addEventListener('click', async () => {
+      const model = document.getElementById('pull-model-input').value.trim();
+      const statusEl = document.getElementById('pull-status');
+      if (!model) { alert('Please enter a model name.'); return; }
+      try {
+        const resp = await fetch(`/api/pull?model=${encodeURIComponent(model)}`,{method:'POST'});
+        if (!resp.ok) throw new Error(`Status ${resp.status}`);
+        const data = await resp.json();
+        statusEl.textContent = `✅ ${JSON.stringify(data, null, 2)}`;
+        statusEl.style.color = 'green';
+        loadTags();
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = `❌ ${err.message}`;
+        statusEl.style.color = 'red';
+      }
+    });
 
-    try {
-      const resp = await fetch(
-        `/api/show?model=${encodeURIComponent(model)}`,
-        {method: 'POST'}
-      );
-      if (!resp.ok) throw new Error(`Status ${resp.status}`);
-      const data = await resp.json();
+    /* modal close */
+    const modal = document.getElementById('show-modal');
+    modal.addEventListener('click', e => {
+      if (e.target === modal || e.target.matches('.close-btn')) {
+        modal.style.display = 'none';
+      }
+    });
 
-      const jsonText = JSON.stringify(data, null, 2)
-      .replace(/\\n/g, '\n');
-
-      document.getElementById('json-output').textContent = jsonText;
-      document.getElementById('show-modal').style.display = 'flex';
-    } catch (err) {
-      console.error(err);
-      alert(`Could not load model details: ${err.message}`);
-    }
-  });
-
-  document.getElementById('pull-btn').addEventListener('click', async () => {
-  const model = document.getElementById('pull-model-input').value.trim();
-  const statusEl = document.getElementById('pull-status');
-
-  if (!model) {
-    alert('Please enter a model name.');
-    return;
-  }
-
-  try {
-    const resp = await fetch(
-      `/api/pull?model=${encodeURIComponent(model)}`,
-      {method: 'POST'}
-    );
-
-    if (!resp.ok) throw new Error(`Status ${resp.status}`);
-    const data = await resp.json();
-
-    statusEl.textContent = `✅ ${JSON.stringify(data, null, 2)}`;
-    statusEl.style.color = 'green';
-
-    // Optional: refresh the tags list so the new model appears
-    loadTags();
-  } catch (err) {
-    console.error(err);
-    statusEl.textContent = `❌ ${err.message}`;
-    statusEl.style.color = 'red';
-  }
-});
-
-  
-  const modal = document.getElementById('show-modal');
-  modal.addEventListener('click', e => {
-    if (e.target === modal || e.target.matches('.close-btn')) {
-      modal.style.display = 'none';
-    }
-  });
   }catch(e){ console.error(e); }
 }
 
+/* ---------- PS ---------- */
 async function loadPS(){
   try{
     const data = await fetchJSON('/api/ps');
@@ -320,18 +250,54 @@ async function loadPS(){
   }catch(e){ console.error(e); }
 }
 
+/* ---------- Usage Chart (stacked‑percentage) ---------- */
+function getColor(seed){
+  const h = Math.abs(hashString(seed) % 360);
+  return `hsl(${h}, 70%, 50%)`;
+}
+function hashString(str){
+  let hash = 0;
+  for (let i=0;i<str.length;i++){
+    hash = ((hash<<5)-hash)+str.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+async function loadUsage(){
+  try{
+    const data = await fetchJSON('/api/usage');
+    const chart = document.getElementById('usage-chart');
+    const usage = data.usage_counts || {};
+
+    let html = '';
+    for (const [endpoint, models] of Object.entries(usage)){
+      const total = Object.values(models).reduce((a,b)=>a+b,0);
+      html += `<div class="endpoint-bar"><div class="endpoint-label">${endpoint}</div><div class="bar">`;
+      for (const [model, count] of Object.entries(models)){
+        const pct = total ? (count/total)*100 : 0;
+        const width = pct.toFixed(2);
+        const color = getColor(model);
+        html += `<div class="segment" style="width:${width}%;background:${color};">${model} (${count})</div>`;
+      }
+      html += `</div></div>`;
+    }
+    chart.innerHTML = html;
+  }catch(e){
+    console.error('Failed to load usage counts', e);
+  }
+}
+
+/* ---------- Init ---------- */
 window.addEventListener('load', ()=>{
   loadEndpoints();
   loadTags();
   loadPS();
+  loadUsage();
+  setInterval(loadPS, 60_000);
+  setInterval(loadUsage, 1_000);
 });
-setInterval(() => {
-  loadTags();
-}, 600_000);
-setInterval(() => {
-  loadPS();
-}, 60_000);
 </script>
+
 <div id="show-modal" class="modal">
   <div class="modal-content">
     <span class="close-btn">&times;</span>
