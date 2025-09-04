@@ -13,5 +13,8 @@ max_concurrent_connections: 2
 # Set an environment variable like OPENAI_KEY
 # Confirm endpoints are exactly as in endpoints block
 api_keys:
+  "http://192.168.0.50:11434": "ollama"
+  "http://192.168.0.51:11434": "ollama"
+  "http://192.168.0.52:11434": "ollama"
   "https://openrouter.ai/api/v1": "${OPENROUTER_KEY}"
   "https://api.openai.com/v1": "${OPENAI_KEY}"
