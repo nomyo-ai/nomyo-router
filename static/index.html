@@ -203,7 +203,7 @@ async function loadTags(){
         const resp = await fetch(`/api/show?model=${encodeURIComponent(model)}`,{method:'POST'});
         if (!resp.ok) throw new Error(`Status ${resp.status}`);
         const data = await resp.json();
-        document.getElementById('json-output').textContent = JSON.stringify(data, null, 2);
+        document.getElementById('json-output').textContent = JSON.stringify(data, null, 2).replace(/\\n/g, '\n');
         document.getElementById('show-modal').style.display = 'flex';
       } catch (err) {
         console.error(err);
@@ -253,7 +253,7 @@ async function loadPS(){
 /* ---------- Usage Chart (stacked‑percentage) ---------- */
 function getColor(seed){
   const h = Math.abs(hashString(seed) % 360);
-  return `hsl(${h}, 80%, 40%)`;
+  return `hsl(${h}, 80%, 30%)`;
 }
 function hashString(str){
   let hash = 0;
