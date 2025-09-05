@@ -253,7 +253,7 @@ async function loadPS(){
 /* ---------- Usage Chart (stacked‑percentage) ---------- */
 function getColor(seed){
   const h = Math.abs(hashString(seed) % 360);
-  return `hsl(${h}, 70%, 50%)`;
+  return `hsl(${h}, 80%, 40%)`;
 }
 function hashString(str){
   let hash = 0;
@@ -263,28 +263,57 @@ function hashString(str){
   }
   return Math.abs(hash);
 }
-async function loadUsage(){
-  try{
-    const data = await fetchJSON('/api/usage');
+async function loadUsage() {
+  // Create the EventSource once and keep it around
+  const source = new EventSource('/api/usage-stream');
+
+  // -----------------------------------------------------------------
+  // Helper that receives the payload and renders the chart
+  // -----------------------------------------------------------------
+  const renderChart = (data) => {
     const chart = document.getElementById('usage-chart');
     const usage = data.usage_counts || {};
 
     let html = '';
-    for (const [endpoint, models] of Object.entries(usage)){
-      const total = Object.values(models).reduce((a,b)=>a+b,0);
-      html += `<div class="endpoint-bar"><div class="endpoint-label">${endpoint}</div><div class="bar">`;
-      for (const [model, count] of Object.entries(models)){
-        const pct = total ? (count/total)*100 : 0;
+    for (const [endpoint, models] of Object.entries(usage)) {
+      const total = Object.values(models).reduce((a, b) => a + b, 0);
+
+      html += `<div class="endpoint-bar">
+                 <div class="endpoint-label">${endpoint}</div>
+                 <div class="bar">`;
+
+      for (const [model, count] of Object.entries(models)) {
+        const pct = total ? (count / total) * 100 : 0;
         const width = pct.toFixed(2);
         const color = getColor(model);
-        html += `<div class="segment" style="width:${width}%;background:${color};">${model} (${count})</div>`;
+        html += `<div class="segment"
+                  style="width:${width}%;background:${color};">
+                  ${model} (${count})
+                </div>`;
       }
+
       html += `</div></div>`;
     }
     chart.innerHTML = html;
-  }catch(e){
-    console.error('Failed to load usage counts', e);
-  }
+  };
+
+  // -----------------------------------------------------------------
+  // Event handlers
+  // -----------------------------------------------------------------
+  source.onmessage = (e) => {
+    try {
+      const payload = JSON.parse(e.data); // SSE sends plain text
+      renderChart(payload);
+    } catch (err) {
+      console.error('Failed to parse SSE payload', err);
+    }
+  };
+
+  source.onerror = (err) => {
+    console.error('SSE connection error. Retrying...', err);
+    // EventSource will automatically try to reconnect.
+  };
+  window.addEventListener('beforeunload', () => source.close());
 }
 
 /* ---------- Init ---------- */
@@ -294,7 +323,7 @@ window.addEventListener('load', ()=>{
   loadPS();
   loadUsage();
   setInterval(loadPS, 60_000);
-  setInterval(loadUsage, 1_000);
+  setInterval(loadEndpoints, 300_000);
 });
 </script>
 
