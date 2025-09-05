@@ -1234,7 +1234,7 @@ async def openai_completions_proxy(request: Request):
 @app.get("/v1/models")
 async def openai_models_proxy(request: Request):
     """
-    Proxy a models request to Ollama endpoints and reply with a unique list of all models.
+    Proxy an OpenAI API models request to Ollama endpoints and reply with a unique list of all models.
 
     """
     # 1. Query all endpoints for models
@@ -1269,8 +1269,8 @@ async def redirect_favicon():
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """
-    Render the landing page that lists the configured endpoints
-    and the models available / running.
+    Render the dynamic NOMYO Router dashboard listing the configured endpoints
+    and the models details, availability & task status.
     """
     return HTMLResponse(content=open("static/index.html", "r").read(), status_code=200)
 
