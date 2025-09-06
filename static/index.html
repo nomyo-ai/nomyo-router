@@ -474,8 +474,7 @@
                                 if (!resp.ok)
                                     throw new Error(`Status ${resp.status}`);
                                 const data = await resp.json();
-                                console.log(data);
-                                statusEl.textContent = `✅ ${JSON.stringify(data, null, 2)}`;
+                                statusEl.textContent = `✅ ${data.status}`;
                                 statusEl.style.color = "green";
                                 loadTags();
                             } catch (err) {
