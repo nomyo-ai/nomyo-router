@@ -1,338 +1,606 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>NOMYO Router Dashboard</title>
-<style>
-  body{font-family:Arial,Helvetica,sans-serif;background:#f7f7f7;color:#333;padding:20px;}
-  h2 {margin: 0;}
-  .tables-wrapper{display:flex;gap:2rem;}
-  .table-container{flex:1;min-width:350px;background:#fff;padding:1rem;border-radius:6px;}
-  /* ---------- Header + Pull form ---------- */
-  .header-pull-wrapper{display:flex;flex-direction:row;align-items:center;gap:1rem;margin-bottom:0;}
-  #pull-section{display:flex;align-items:center;}
-  #pull-section input{flex:1;padding:0;margin-right:0.5rem;}
-  #pull-section button{padding:0 0;}
-  #pull-status{margin-left:0.5rem; font-weight:bold;}
-  /* ---------- Tables ---------- */
-  table{width:100%;border-collapse:collapse;margin-top:1rem;}
-  th,td{border:1px solid #ddd;padding:0.5rem;text-align:left;}
-  th{background:#e0e0e0;}
-  .loading{color:#777;font-style:italic;}
-  .status-ok{color:#006400;font-weight:bold;}
-  .status-error{color:#8B0000;font-weight:bold;}
-  .copy-link,.delete-link,.show-link{font-size:0.9em;margin-left:0.5em;cursor:pointer;text-decoration:underline;float:right;}
-  .delete-link{color:#b22222;}
-  .copy-link,.show-link{color:#0066cc;}
-  .delete-link:hover,.copy-link:hover,.show-link:hover{text-decoration:none;}
-  /* ---------- Modal ---------- */
-  .modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.6);align-items:center;justify-content:center;}
-  .modal-content{background:#fff;padding:1rem;max-width:90%;max-height:90%;overflow:auto;border-radius:6px;}
-  .close-btn{float:right;cursor:pointer;font-size:1.5rem;}
-  /* ---------- Usage Chart ---------- */
-  .usage-chart{margin-top:20px;}
-  .endpoint-bar{margin-bottom:12px;}
-  .endpoint-label{font-weight:bold;margin-bottom:4px;}
-  .bar{display:flex;height:16px;background:#e0e0e0;border-radius:4px;overflow:hidden;}
-  .segment{height:100%;color:white;font-size:12px;font-weight: bolder;display:flex;align-items:center;justify-content:center;white-space:nowrap;}
-  .table-container {padding-top:1rem;}
-    /* ---------- Responsive reorder ---------- */
-  @media (max-aspect-ratio: 1/1) {
-    .tables-wrapper {
-      flex-direction: column;
-    }
-    .tables-wrapper > .table-container:nth-child(1) { /* Tags container */
-      order: 2;
-    }
-    .tables-wrapper > .table-container:nth-child(2) { /* PS container */
-      order: 1;
-    }
-  }
-</style>
-</head>
-<body>
-<a href="https://www.nomyo.ai" target="_blank"><img src="./static/228394408.png" width="100px" height="100px"></a>
-<h1>Router Dashboard</h1>
+    <head>
+        <meta charset="UTF-8" />
+        <title>NOMYO Router Dashboard</title>
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.9.0/css/all.min.css" rel="stylesheet">
+        <style>
+            body {
+                font-family: Arial, Helvetica, sans-serif;
+                background: #e0e0e0;
+                color: #333;
+                padding: 20px;
+            }
+            .dark-mode {
+                filter: invert(100%);
+            }
+            h2 {
+                margin: 0;
+            }
+            #dark-mode-button {
+                position: fixed;           /* stays relative to the viewport */
+                top: 1rem;                 /* distance from top edge */
+                right: 1rem;               /* distance from right edge */
+                cursor: pointer;
+                min-width: 2.5rem;
+                min-height: 2.5rem;
+                font-size: 1.5rem;
+            }
+            .tables-wrapper {
+                display: flex;
+                gap: 2rem;
+            }
+            .table-container {
+                flex: 1;
+                min-width: 350px;
+                background: white;
+                padding: 1rem;
+                border-radius: 6px;
+            }
+            .endpoints-container {
+                flex: 1;
+                min-width: 350px;
+                background: white;
+                padding: 1rem;
+                margin-top: 1rem;
+                border-radius: 6px;
+            }
+            /* ---------- Header + Pull form ---------- */
+            .header-pull-wrapper {
+                display: flex;
+                flex-direction: row;
+                align-items: center;
+                gap: 1rem;
+                margin-bottom: 0;
+            }
+            
+            #pull-section {
+                display: flex;
+                align-items: center;
+            }
+            #pull-section label {
+                min-width: 30%;
+            }
+            #pull-section input {
+                flex: 1;
+                padding: 0;
+                margin-right: 0.5rem;
+                margin-left: 0.5rem;
+                min-width: 50%;
+                min-height: 1.5rem;
+                text-align: left;
+                text-indent: 0.25rem;
+                outline: 0.1rem solid;
+            }
+            #pull-section button {
+                padding: 0 0;
+                cursor: pointer;
+                background-color: #e0e0e0;
+                color: black;
+                border: none;
+                outline: none;
+                margin-left: 0.5rem;
+                margin-right: 0.5rem;
+                min-width: 30%;
+                min-height: 2rem;
+                font-size: 1rem;
+                transition: 0.3s;
+            }
+            #pull-section button:hover {
+                background-color: #d1d1d1;
+                
+            }
+            #pull-status {
+                margin-left: 0.5rem;
+                font-weight: bold;
+            }
+            /* ---------- Tables ---------- */
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 1rem;
+            }
+            th,
+            td {
+                border: 1px solid #ddd;
+                padding: 0.5rem;
+                text-align: left;
+            }
+            th {
+                background: #e0e0e0;
+            }
+            .loading {
+                color: #777;
+                font-style: italic;
+            }
+            .status-ok {
+                color: #006400;
+                font-weight: bold;
+            }
+            .status-error {
+                color: #8b0000;
+                font-weight: bold;
+            }
+            .copy-link,
+            .delete-link,
+            .show-link {
+                font-size: 0.9em;
+                margin-left: 0.5em;
+                cursor: pointer;
+                text-decoration: underline;
+                float: right;
+            }
+            .delete-link {
+                color: #b22222;
+            }
+            .copy-link,
+            .show-link {
+                color: #0066cc;
+            }
+            .delete-link:hover,
+            .copy-link:hover,
+            .show-link:hover {
+                text-decoration: none;
+            }
+            /* ---------- Modal ---------- */
+            .modal {
+                display: none;
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.6);
+                align-items: center;
+                justify-content: center;
+            }
+            .modal-content {
+                background: #fff;
+                padding: 1rem;
+                max-width: 90%;
+                max-height: 90%;
+                overflow: auto;
+                border-radius: 6px;
+            }
+            .close-btn {
+                float: right;
+                cursor: pointer;
+                font-size: 1.5rem;
+            }
+            /* ---------- Usage Chart ---------- */
+            .usage-chart {
+                margin-top: 20px;
+            }
+            .endpoint-bar {
+                margin-bottom: 12px;
+            }
+            .endpoint-label {
+                font-weight: bold;
+                margin-bottom: 4px;
+            }
+            .bar {
+                display: flex;
+                height: 16px;
+                background: #e0e0e0;
+                border-radius: 4px;
+                overflow: hidden;
+            }
+            .segment {
+                height: 100%;
+                color: white;
+                font-size: 12px;
+                font-weight: bolder;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                white-space: nowrap;
+            }
+            .table-container {
+                padding-top: 1rem;
+            }
+            /* ---------- Responsive reorder ---------- */
+            @media (max-aspect-ratio: 1/1) {
+                .tables-wrapper {
+                    flex-direction: column;
+                }
+                .tables-wrapper > .table-container:nth-child(1) {
+                    /* Tags container */
+                    order: 2;
+                }
+                .tables-wrapper > .table-container:nth-child(2) {
+                    /* PS container */
+                    order: 1;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <a href="https://www.nomyo.ai" target="_blank"
+            ><img src="./static/228394408.png" width="100px" height="100px"
+        /></a>
+        <h1>Router Dashboard</h1>
 
-<div class="tables-wrapper">
-  <!-- ---------- Tags ---------- -->
-  <div class="table-container">
-    <div class="header-pull-wrapper">
-      <h2><span id="tags-count"></span> Available Models (Tags)</h2>
-      <div id="pull-section">
-        <label for="pull-model-input">Pull a model:</label>
-        <input type="text" id="pull-model-input" placeholder="llama3:latest" />
-        <button id="pull-btn">Pull</button>
-        <span id="pull-status"></span>
-      </div>
-    </div>
+        <button onclick="toggleDarkMode()" id="dark-mode-button"><i class="fas fa-moon"></i></button>
+        
+        <div class="tables-wrapper">
+            <!-- ---------- Tags ---------- -->
+            <div class="table-container">
+                <div class="header-pull-wrapper">
+                    <h2>
+                        <span id="tags-count"></span> Available Models (Tags)
+                    </h2>
+                    <div id="pull-section">
+                        <label for="pull-model-input">Pull a model: </label>
+                        <input
+                            type="text"
+                            id="pull-model-input"
+                            placeholder="llama3:latest"
+                        />
+                        <button id="pull-btn">Pull</button>
+                        <span id="pull-status"></span>
+                    </div>
+                </div>
 
-    <table id="tags-table">
-      <thead><tr><th>Model</th><th>Digest</th></tr></thead>
-      <tbody id="tags-body"><tr><td colspan="2" class="loading">Loading…</td></tr></tbody>
-    </table>
-  </div>
+                <table id="tags-table">
+                    <thead>
+                        <tr>
+                            <th>Model</th>
+                            <th>Digest</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tags-body">
+                        <tr>
+                            <td colspan="2" class="loading">Loading…</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
 
-  <!-- ---------- PS + Usage Chart ---------- -->
-  <div class="table-container">
-    <h2>Running Models (PS)</h2>
-    <table id="ps-table">
-      <thead>
-        <tr>
-          <th>Model</th>
-          <th>Params</th>
-          <th>Quant</th>
-          <th>Ctx</th>
-          <th>Digest</th>
-        </tr>
-      </thead>
-      <tbody id="ps-body"><tr><td colspan="5" class="loading">Loading…</td></tr></tbody>
-    </table>
+            <!-- ---------- PS + Usage Chart ---------- -->
+            <div class="table-container">
+                <h2>Running Models (PS)</h2>
+                <table id="ps-table">
+                    <thead>
+                        <tr>
+                            <th>Model</th>
+                            <th>Params</th>
+                            <th>Quant</th>
+                            <th>Ctx</th>
+                            <th>Digest</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ps-body">
+                        <tr>
+                            <td colspan="5" class="loading">Loading…</td>
+                        </tr>
+                    </tbody>
+                </table>
 
-    <!-- ------------- Usage Chart ------------- -->
-    <div id="usage-chart" class="usage-chart"></div>
-  </div>
-</div>
+                <!-- ------------- Usage Chart ------------- -->
+                <div id="usage-chart" class="usage-chart"></div>
+            </div>
+        </div>
+        <div class="endpoints-container">
+        <h2>Configured Endpoints</h2>
+        <table id="endpoints-table">
+            <thead>
+                <tr>
+                    <th>Endpoint</th>
+                    <th>Status</th>
+                    <th>Version</th>
+                </tr>
+            </thead>
+            <tbody id="endpoints-body">
+                <tr>
+                    <td colspan="3" class="loading">Loading…</td>
+                </tr>
+            </tbody>
+        </table>
+        </div>
 
-<h2>Configured Endpoints</h2>
-<table id="endpoints-table">
-  <thead>
-    <tr>
-      <th>Endpoint</th>
-      <th>Status</th>
-      <th>Version</th>
-    </tr>
-  </thead>
-  <tbody id="endpoints-body"><tr><td colspan="3" class="loading">Loading…</td></tr></tbody>
-</table>
+        <script>
+            /* ---------- Utility ---------- */
+            async function fetchJSON(url) {
+                const resp = await fetch(url);
+                if (!resp.ok) {
+                    throw new Error(`Failed ${url}: ${resp.status}`);
+                }
+                return await resp.json();
+            }
+            
+            function toggleDarkMode() {
+              document.documentElement.classList.toggle("dark-mode");
+            }
 
-<script>
-/* ---------- Utility ---------- */
-async function fetchJSON(url){
-  const resp = await fetch(url);
-  if(!resp.ok){ throw new Error(`Failed ${url}: ${resp.status}`); }
-  return await resp.json();
-}
-
-/* ---------- Endpoints ---------- */
-async function loadEndpoints(){
-  try{
-    const data = await fetchJSON('/api/config');
-    const body = document.getElementById('endpoints-body');
-    body.innerHTML = data.endpoints.map(e => {
-      const statusClass = e.status === 'ok' ? 'status-ok' : 'status-error';
-      const version = e.version || 'N/A';
-      return `
+            /* ---------- Endpoints ---------- */
+            async function loadEndpoints() {
+                try {
+                    const data = await fetchJSON("/api/config");
+                    const body = document.getElementById("endpoints-body");
+                    body.innerHTML = data.endpoints
+                        .map((e) => {
+                            const statusClass =
+                                e.status === "ok"
+                                    ? "status-ok"
+                                    : "status-error";
+                            const version = e.version || "N/A";
+                            return `
         <tr>
           <td class="endpoint">${e.url}</td>
           <td class="status ${statusClass}">${e.status}</td>
           <td class="version">${version}</td>
         </tr>`;
-    }).join('');
-  }catch(e){
-    console.error(e);
-    const body = document.getElementById('endpoints-body');
-    body.innerHTML = `<tr><td colspan="3" class="loading">Failed to load endpoints</td></tr>`;
-  }
-}
+                        })
+                        .join("");
+                } catch (e) {
+                    console.error(e);
+                    const body = document.getElementById("endpoints-body");
+                    body.innerHTML = `<tr><td colspan="3" class="loading">Failed to load endpoints</td></tr>`;
+                }
+            }
 
-/* ---------- Tags ---------- */
-async function loadTags(){
-  try{
-    const data = await fetchJSON('/api/tags');
-    const body = document.getElementById('tags-body');
-    body.innerHTML = data.models.map(m => {
-      let modelCell = `${m.id || m.name}`;
-      if (m.digest) {
-        modelCell += `<a href="#" class="delete-link" data-model="${m.name}">delete</a>`;
-        modelCell += `<a href="#" class="copy-link" data-source="${m.name}">copy</a>`;
-        modelCell += `<a href="#" class="show-link" data-model="${m.name}">show</a>`;
-      }
-      return `
+            /* ---------- Tags ---------- */
+            async function loadTags() {
+                try {
+                    const data = await fetchJSON("/api/tags");
+                    const body = document.getElementById("tags-body");
+                    body.innerHTML = data.models
+                        .map((m) => {
+                            let modelCell = `${m.id || m.name}`;
+                            if (m.digest) {
+                                modelCell += `<a href="#" class="delete-link" data-model="${m.name}">delete</a>`;
+                                modelCell += `<a href="#" class="copy-link" data-source="${m.name}">copy</a>`;
+                                modelCell += `<a href="#" class="show-link" data-model="${m.name}">show</a>`;
+                            }
+                            return `
         <tr>
           <td class="model">${modelCell}</td>
-          <td>${m.digest || ''}</td>
+          <td>${m.digest || ""}</td>
         </tr>`;
-    }).join('');
-    document.getElementById('tags-count').textContent = `${data.models.length}`;
+                        })
+                        .join("");
+                    document.getElementById("tags-count").textContent =
+                        `${data.models.length}`;
 
-    /* copy logic */
-    document.querySelectorAll('.copy-link').forEach(link => {
-      link.addEventListener('click', async (e) => {
-        e.preventDefault();
-        const source = link.dataset.source;
-        const dest = prompt(`Enter destination for ${source}:`);
-        if (!dest) return;
-        try{
-          const resp = await fetch(`/api/copy?source=${encodeURIComponent(source)}&destination=${encodeURIComponent(dest)}`,{method:'POST'});
-          if (!resp.ok) throw new Error(`Copy failed: ${resp.status}`);
-          alert(`Copied ${source} to ${dest} successfully.`);
-          loadTags();
-        }catch(err){
-          console.error(err);
-          alert(`Error copying ${source} to ${dest}: ${err}`);
-        }
-      });
-    });
+                    /* copy logic */
+                    document.querySelectorAll(".copy-link").forEach((link) => {
+                        link.addEventListener("click", async (e) => {
+                            e.preventDefault();
+                            const source = link.dataset.source;
+                            const dest = prompt(
+                                `Enter destination for ${source}:`,
+                            );
+                            if (!dest) return;
+                            try {
+                                const resp = await fetch(
+                                    `/api/copy?source=${encodeURIComponent(source)}&destination=${encodeURIComponent(dest)}`,
+                                    { method: "POST" },
+                                );
+                                if (!resp.ok)
+                                    throw new Error(
+                                        `Copy failed: ${resp.status}`,
+                                    );
+                                alert(
+                                    `Copied ${source} to ${dest} successfully.`,
+                                );
+                                loadTags();
+                            } catch (err) {
+                                console.error(err);
+                                alert(
+                                    `Error copying ${source} to ${dest}: ${err}`,
+                                );
+                            }
+                        });
+                    });
 
-    /* delete logic */
-    document.querySelectorAll('.delete-link').forEach(link => {
-      link.addEventListener('click', async e => {
-        e.preventDefault();
-        const model = link.dataset.model;
-        const ok = confirm(`Delete the model “${model}”? This cannot be undone.`);
-        if (!ok) return;
-        try {
-          const resp = await fetch(`/api/delete?model=${encodeURIComponent(model)}`,{method:'DELETE'});
-          if (!resp.ok) throw new Error(`Delete failed: ${resp.status}`);
-          alert(`Model “${model}” deleted successfully.`);
-          loadTags();
-        } catch (err) {
-          console.error(err);
-          alert(`Error deleting ${model}: ${err}`);
-        }
-      });
-    });
+                    /* delete logic */
+                    document
+                        .querySelectorAll(".delete-link")
+                        .forEach((link) => {
+                            link.addEventListener("click", async (e) => {
+                                e.preventDefault();
+                                const model = link.dataset.model;
+                                const ok = confirm(
+                                    `Delete the model “${model}”? This cannot be undone.`,
+                                );
+                                if (!ok) return;
+                                try {
+                                    const resp = await fetch(
+                                        `/api/delete?model=${encodeURIComponent(model)}`,
+                                        { method: "DELETE" },
+                                    );
+                                    if (!resp.ok)
+                                        throw new Error(
+                                            `Delete failed: ${resp.status}`,
+                                        );
+                                    alert(
+                                        `Model “${model}” deleted successfully.`,
+                                    );
+                                    loadTags();
+                                } catch (err) {
+                                    console.error(err);
+                                    alert(`Error deleting ${model}: ${err}`);
+                                }
+                            });
+                        });
 
-    /* show logic */
-    document.body.addEventListener('click', async e => {
-      if (!e.target.matches('.show-link')) return;
-      e.preventDefault();
-      const model = e.target.dataset.model;
-      try {
-        const resp = await fetch(`/api/show?model=${encodeURIComponent(model)}`,{method:'POST'});
-        if (!resp.ok) throw new Error(`Status ${resp.status}`);
-        const data = await resp.json();
-        document.getElementById('json-output').textContent = JSON.stringify(data, null, 2).replace(/\\n/g, '\n');
-        document.getElementById('show-modal').style.display = 'flex';
-      } catch (err) {
-        console.error(err);
-        alert(`Could not load model details: ${err.message}`);
-      }
-    });
+                    /* show logic */
+                    document.body.addEventListener("click", async (e) => {
+                        if (!e.target.matches(".show-link")) return;
+                        e.preventDefault();
+                        const model = e.target.dataset.model;
+                        try {
+                            const resp = await fetch(
+                                `/api/show?model=${encodeURIComponent(model)}`,
+                                { method: "POST" },
+                            );
+                            if (!resp.ok)
+                                throw new Error(`Status ${resp.status}`);
+                            const data = await resp.json();
+                            document.getElementById("json-output").textContent =
+                                JSON.stringify(data, null, 2).replace(
+                                    /\\n/g,
+                                    "\n",
+                                );
+                            document.getElementById(
+                                "show-modal",
+                            ).style.display = "flex";
+                        } catch (err) {
+                            console.error(err);
+                            alert(
+                                `Could not load model details: ${err.message}`,
+                            );
+                        }
+                    });
 
-    /* pull logic */
-    document.getElementById('pull-btn').addEventListener('click', async () => {
-      const model = document.getElementById('pull-model-input').value.trim();
-      const statusEl = document.getElementById('pull-status');
-      if (!model) { alert('Please enter a model name.'); return; }
-      try {
-        const resp = await fetch(`/api/pull?model=${encodeURIComponent(model)}`,{method:'POST'});
-        if (!resp.ok) throw new Error(`Status ${resp.status}`);
-        const data = await resp.json();
-        statusEl.textContent = `✅ ${JSON.stringify(data, null, 2)}`;
-        statusEl.style.color = 'green';
-        loadTags();
-      } catch (err) {
-        console.error(err);
-        statusEl.textContent = `❌ ${err.message}`;
-        statusEl.style.color = 'red';
-      }
-    });
+                    /* pull logic */
+                    document
+                        .getElementById("pull-btn")
+                        .addEventListener("click", async () => {
+                            const model = document
+                                .getElementById("pull-model-input")
+                                .value.trim();
+                            const statusEl =
+                                document.getElementById("pull-status");
+                            if (!model) {
+                                alert("Please enter a model name.");
+                                return;
+                            }
+                            try {
+                                const resp = await fetch(
+                                    `/api/pull?model=${encodeURIComponent(model)}`,
+                                    { method: "POST" },
+                                );
+                                if (!resp.ok)
+                                    throw new Error(`Status ${resp.status}`);
+                                const data = await resp.json();
+                                statusEl.textContent = `✅ ${JSON.stringify(data, null, 2)}`;
+                                statusEl.style.color = "green";
+                                loadTags();
+                            } catch (err) {
+                                console.error(err);
+                                statusEl.textContent = `❌ ${err.message}`;
+                                statusEl.style.color = "red";
+                            }
+                        });
 
-    /* modal close */
-    const modal = document.getElementById('show-modal');
-    modal.addEventListener('click', e => {
-      if (e.target === modal || e.target.matches('.close-btn')) {
-        modal.style.display = 'none';
-      }
-    });
+                    /* modal close */
+                    const modal = document.getElementById("show-modal");
+                    modal.addEventListener("click", (e) => {
+                        if (
+                            e.target === modal ||
+                            e.target.matches(".close-btn")
+                        ) {
+                            modal.style.display = "none";
+                        }
+                    });
+                } catch (e) {
+                    console.error(e);
+                }
+            }
 
-  }catch(e){ console.error(e); }
-}
+            /* ---------- PS ---------- */
+            async function loadPS() {
+                try {
+                    const data = await fetchJSON("/api/ps");
+                    const body = document.getElementById("ps-body");
+                    body.innerHTML = data.models
+                        .map(
+                            (m) =>
+                                `<tr><td class="model">${m.name}</td><td>${m.details.parameter_size}</td><td>${m.details.quantization_level}</td><td>${m.context_length}</td><td>${m.digest}</td></tr>`,
+                        )
+                        .join("");
+                } catch (e) {
+                    console.error(e);
+                }
+            }
 
-/* ---------- PS ---------- */
-async function loadPS(){
-  try{
-    const data = await fetchJSON('/api/ps');
-    const body = document.getElementById('ps-body');
-    body.innerHTML = data.models.map(m=>`<tr><td class="model">${m.name}</td><td>${m.details.parameter_size}</td><td>${m.details.quantization_level}</td><td>${m.context_length}</td><td>${m.digest}</td></tr>`).join('');
-  }catch(e){ console.error(e); }
-}
+            /* ---------- Usage Chart (stacked‑percentage) ---------- */
+            function getColor(seed) {
+                const h = Math.abs(hashString(seed) % 360);
+                return `hsl(${h}, 80%, 30%)`;
+            }
+            function hashString(str) {
+                let hash = 0;
+                for (let i = 0; i < str.length; i++) {
+                    hash = (hash << 5) - hash + str.charCodeAt(i);
+                    hash |= 0;
+                }
+                return Math.abs(hash);
+            }
+            async function loadUsage() {
+                // Create the EventSource once and keep it around
+                const source = new EventSource("/api/usage-stream");
 
-/* ---------- Usage Chart (stacked‑percentage) ---------- */
-function getColor(seed){
-  const h = Math.abs(hashString(seed) % 360);
-  return `hsl(${h}, 80%, 30%)`;
-}
-function hashString(str){
-  let hash = 0;
-  for (let i=0;i<str.length;i++){
-    hash = ((hash<<5)-hash)+str.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash);
-}
-async function loadUsage() {
-  // Create the EventSource once and keep it around
-  const source = new EventSource('/api/usage-stream');
+                // -----------------------------------------------------------------
+                // Helper that receives the payload and renders the chart
+                // -----------------------------------------------------------------
+                const renderChart = (data) => {
+                    const chart = document.getElementById("usage-chart");
+                    const usage = data.usage_counts || {};
 
-  // -----------------------------------------------------------------
-  // Helper that receives the payload and renders the chart
-  // -----------------------------------------------------------------
-  const renderChart = (data) => {
-    const chart = document.getElementById('usage-chart');
-    const usage = data.usage_counts || {};
+                    let html = "";
+                    for (const [endpoint, models] of Object.entries(usage)) {
+                        const total = Object.values(models).reduce(
+                            (a, b) => a + b,
+                            0,
+                        );
 
-    let html = '';
-    for (const [endpoint, models] of Object.entries(usage)) {
-      const total = Object.values(models).reduce((a, b) => a + b, 0);
-
-      html += `<div class="endpoint-bar">
+                        html += `<div class="endpoint-bar">
                  <div class="endpoint-label">${endpoint}</div>
                  <div class="bar">`;
 
-      for (const [model, count] of Object.entries(models)) {
-        const pct = total ? (count / total) * 100 : 0;
-        const width = pct.toFixed(2);
-        const color = getColor(model);
-        html += `<div class="segment"
+                        for (const [model, count] of Object.entries(models)) {
+                            const pct = total ? (count / total) * 100 : 0;
+                            const width = pct.toFixed(2);
+                            const color = getColor(model);
+                            html += `<div class="segment"
                   style="width:${width}%;background:${color};">
                   ${model} (${count})
                 </div>`;
-      }
+                        }
 
-      html += `</div></div>`;
-    }
-    chart.innerHTML = html;
-  };
+                        html += `</div></div>`;
+                    }
+                    chart.innerHTML = html;
+                };
 
-  // -----------------------------------------------------------------
-  // Event handlers
-  // -----------------------------------------------------------------
-  source.onmessage = (e) => {
-    try {
-      const payload = JSON.parse(e.data); // SSE sends plain text
-      renderChart(payload);
-    } catch (err) {
-      console.error('Failed to parse SSE payload', err);
-    }
-  };
+                // -----------------------------------------------------------------
+                // Event handlers
+                // -----------------------------------------------------------------
+                source.onmessage = (e) => {
+                    try {
+                        const payload = JSON.parse(e.data); // SSE sends plain text
+                        renderChart(payload);
+                    } catch (err) {
+                        console.error("Failed to parse SSE payload", err);
+                    }
+                };
 
-  source.onerror = (err) => {
-    console.error('SSE connection error. Retrying...', err);
-    // EventSource will automatically try to reconnect.
-  };
-  window.addEventListener('beforeunload', () => source.close());
-}
+                source.onerror = (err) => {
+                    console.error("SSE connection error. Retrying...", err);
+                    // EventSource will automatically try to reconnect.
+                };
+                window.addEventListener("beforeunload", () => source.close());
+            }
 
-/* ---------- Init ---------- */
-window.addEventListener('load', ()=>{
-  loadEndpoints();
-  loadTags();
-  loadPS();
-  loadUsage();
-  setInterval(loadPS, 60_000);
-  setInterval(loadEndpoints, 300_000);
-});
-</script>
+            /* ---------- Init ---------- */
+            window.addEventListener("load", () => {
+                loadEndpoints();
+                loadTags();
+                loadPS();
+                loadUsage();
+                setInterval(loadPS, 60_000);
+                setInterval(loadEndpoints, 300_000);
+            });
+        </script>
 
-<div id="show-modal" class="modal">
-  <div class="modal-content">
-    <span class="close-btn">&times;</span>
-    <h2>Model details</h2>
-    <pre id="json-output"></pre>
-  </div>
-</div>
-</body>
+        <div id="show-modal" class="modal">
+            <div class="modal-content">
+                <span class="close-btn">&times;</span>
+                <h2>Model details</h2>
+                <pre id="json-output"></pre>
+            </div>
+        </div>
+    </body>
 </html>
