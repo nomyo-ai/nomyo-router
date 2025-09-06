@@ -3,7 +3,6 @@
     <head>
         <meta charset="UTF-8" />
         <title>NOMYO Router Dashboard</title>
-        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.9.0/css/all.min.css" rel="stylesheet">
         <style>
             body {
                 font-family: Arial, Helvetica, sans-serif;
@@ -18,9 +17,9 @@
                 margin: 0;
             }
             #dark-mode-button {
-                position: fixed;           /* stays relative to the viewport */
-                top: 1rem;                 /* distance from top edge */
-                right: 1rem;               /* distance from right edge */
+                position: fixed; /* stays relative to the viewport */
+                top: 1rem; /* distance from top edge */
+                right: 1rem; /* distance from right edge */
                 cursor: pointer;
                 min-width: 2.5rem;
                 min-height: 2.5rem;
@@ -53,7 +52,7 @@
                 gap: 1rem;
                 margin-bottom: 0;
             }
-            
+
             #pull-section {
                 display: flex;
                 align-items: center;
@@ -88,7 +87,6 @@
             }
             #pull-section button:hover {
                 background-color: #d1d1d1;
-                
             }
             #pull-status {
                 margin-left: 0.5rem;
@@ -220,8 +218,10 @@
         /></a>
         <h1>Router Dashboard</h1>
 
-        <button onclick="toggleDarkMode()" id="dark-mode-button"><i class="fas fa-moon"></i></button>
-        
+        <button onclick="toggleDarkMode()" id="dark-mode-button">
+            🌗
+        </button>
+
         <div class="tables-wrapper">
             <!-- ---------- Tags ---------- -->
             <div class="table-container">
@@ -281,21 +281,21 @@
             </div>
         </div>
         <div class="endpoints-container">
-        <h2>Configured Endpoints</h2>
-        <table id="endpoints-table">
-            <thead>
-                <tr>
-                    <th>Endpoint</th>
-                    <th>Status</th>
-                    <th>Version</th>
-                </tr>
-            </thead>
-            <tbody id="endpoints-body">
-                <tr>
-                    <td colspan="3" class="loading">Loading…</td>
-                </tr>
-            </tbody>
-        </table>
+            <h2>Configured Endpoints</h2>
+            <table id="endpoints-table">
+                <thead>
+                    <tr>
+                        <th>Endpoint</th>
+                        <th>Status</th>
+                        <th>Version</th>
+                    </tr>
+                </thead>
+                <tbody id="endpoints-body">
+                    <tr>
+                        <td colspan="3" class="loading">Loading…</td>
+                    </tr>
+                </tbody>
+            </table>
         </div>
 
         <script>
@@ -307,9 +307,9 @@
                 }
                 return await resp.json();
             }
-            
+
             function toggleDarkMode() {
-              document.documentElement.classList.toggle("dark-mode");
+                document.documentElement.classList.toggle("dark-mode");
             }
 
             /* ---------- Endpoints ---------- */
@@ -474,6 +474,7 @@
                                 if (!resp.ok)
                                     throw new Error(`Status ${resp.status}`);
                                 const data = await resp.json();
+                                console.log(data);
                                 statusEl.textContent = `✅ ${JSON.stringify(data, null, 2)}`;
                                 statusEl.style.color = "green";
                                 loadTags();
