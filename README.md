@@ -28,7 +28,7 @@ Run the NOMYO Router in a dedicated virtual environment, install the requirement
 ```
 python3 -m venv .venv/router
 source .venv/router/bin/activate
-pip3 install requirements.txt -r 
+pip3 install -r requirements.txt
 ```
 finally you can
 
