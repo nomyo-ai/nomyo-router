@@ -1051,8 +1051,6 @@ async def openai_chat_completions_proxy(request: Request):
         params = {
             "messages": messages, 
             "model": model,
-            "stop": stop,
-            "stream": stream,
         }
 
         if tools is not None:
@@ -1075,6 +1073,11 @@ async def openai_chat_completions_proxy(request: Request):
             params["presence_penalty"] = presence_penalty
         if frequency_penalty is not None:
             params["frequency_penalty"] = frequency_penalty
+        if stop is not None:
+            params["stop"] = stop
+        if stream is not None:
+            params["stream"] = stream
+        
         
         if not model:
             raise HTTPException(
@@ -1157,20 +1160,29 @@ async def openai_completions_proxy(request: Request):
         params = {
             "prompt": prompt, 
             "model": model,
-            "frequency_penalty": frequency_penalty, 
-            "presence_penalty": presence_penalty, 
-            "seed": seed, 
-            "stop": stop,
-            "stream": stream,
-            "temperature": temperature,
-            "top_p": top_p, 
-            "max_tokens": max_tokens,
-            "suffix": suffix
         }
 
         if stream_options is not None:
             params["stream_options"] = stream_options
-        
+        if frequency_penalty is not None:
+            params["frequency_penalty"] = frequency_penalty
+        if presence_penalty is not None:
+            params["presence_penalty"] = presence_penalty
+        if seed is not None:
+            params["seed"] = seed
+        if stop is not None:
+            params["stop"] = stop
+        if stream is not None:
+            params["stream"] = stream
+        if temperature is not None:
+            params["temperature"] = temperature
+        if top_p is not None:
+            params["top_p"] = top_p
+        if max_tokens is not None:
+            params["max_tokens"] = max_tokens
+        if suffix is not None:
+            params["suffix"] = suffix
+
         if not model:
             raise HTTPException(
                 status_code=400, detail="Missing required field 'model'"

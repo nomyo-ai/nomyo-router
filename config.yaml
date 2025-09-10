@@ -5,6 +5,7 @@ endpoints:
   - http://192.168.0.52:11434
   #- https://openrouter.ai/api/v1
   #- https://api.openai.com/v1
+  #- https://generativelanguage.googleapis.com/v1beta/openai
 
 # Maximum concurrent connections *per endpoint‑model pair* (equals to OLLAMA_NUM_PARALLEL)
 max_concurrent_connections: 2
@@ -18,3 +19,4 @@ api_keys:
   "http://192.168.0.52:11434": "ollama"
   #"https://openrouter.ai/api/v1": "${OPENROUTER_KEY}"
   #"https://api.openai.com/v1": "${OPENAI_KEY}"
+  #"https://generativelanguage.googleapis.com/v1beta/openai": "${GEMINI_KEY}"
