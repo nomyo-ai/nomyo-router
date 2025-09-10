@@ -179,7 +179,7 @@ async def fetch_loaded_models(endpoint: str) -> Set[str]:
     """
     client: aiohttp.ClientSession = app_state["session"]
     try:
-        async with client.get(f"/api/ps") as resp:
+        async with client.get(f"{endpoint}/api/ps") as resp:
             await _ensure_success(resp)
             data = await resp.json()
         # The response format is:
@@ -327,7 +327,7 @@ async def choose_endpoint(model: str) -> str:
     #      (concurrently, but only for the filtered list)
     load_tasks = [fetch_loaded_models(ep) for ep in candidate_endpoints]
     loaded_sets = await asyncio.gather(*load_tasks)
-
+    
     async with usage_lock:
         # Helper: get current usage count for (endpoint, model)
         def current_usage(ep: str) -> int:
@@ -336,7 +336,7 @@ async def choose_endpoint(model: str) -> str:
         # 3️⃣ Endpoints that have the model loaded *and* a free slot
         loaded_and_free = [
             ep for ep, models in zip(candidate_endpoints, loaded_sets)
-            if model in models and usage_counts[ep].get(model, 0) < config.max_concurrent_connections
+            if model in models and usage_counts.get(ep, {}).get(model, 0) < config.max_concurrent_connections
         ]
         
         if loaded_and_free:
@@ -346,7 +346,7 @@ async def choose_endpoint(model: str) -> str:
         # 4️⃣ Endpoints among the candidates that simply have a free slot
         endpoints_with_free_slot = [
             ep for ep in candidate_endpoints
-            if usage_counts[ep].get(model, 0) < config.max_concurrent_connections
+            if usage_counts.get(ep, {}).get(model, 0) < config.max_concurrent_connections
         ]
 
         if endpoints_with_free_slot:
