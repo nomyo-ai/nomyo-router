@@ -386,7 +386,7 @@ async def proxy(request: Request):
         stream = payload.get("stream")
         think = payload.get("think")
         raw = payload.get("raw")
-        format = payload.get("format")
+        _format = payload.get("format")
         images = payload.get("images")
         options = payload.get("options")
         keep_alive = payload.get("keep_alive")
@@ -414,7 +414,7 @@ async def proxy(request: Request):
     # 4. Async generator that streams data and decrements the counter
     async def stream_generate_response():
         try:
-            async_gen = await client.generate(model=model, prompt=prompt, suffix=suffix, system=system, template=template, context=context, stream=stream, think=think, raw=raw, format=format, images=images, options=options, keep_alive=keep_alive)
+            async_gen = await client.generate(model=model, prompt=prompt, suffix=suffix, system=system, template=template, context=context, stream=stream, think=think, raw=raw, format=_format, images=images, options=options, keep_alive=keep_alive)
             if stream == True:
                 async for chunk in async_gen:
                     if hasattr(chunk, "model_dump_json"):
@@ -974,8 +974,8 @@ async def config_proxy(request: Request):
                 return {"url": url, "status": "ok", "version": "latest"}
             else:
                 return {"url": url, "status": "ok", "version": data.get("version")}
-        except Exception as exc:
-            return {"url": url, "status": "error", "detail": str(exc)}
+        except Exception as e:
+            return {"url": url, "status": "error", "detail": str(e)}
 
     results = await asyncio.gather(*[check_endpoint(ep) for ep in config.endpoints])
     return {"endpoints": results}
