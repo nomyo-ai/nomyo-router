@@ -12,6 +12,7 @@ from typing import Dict, Set, List, Optional
 from fastapi import FastAPI, Request, HTTPException
 from fastapi_sse import sse_handler
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import StreamingResponse, JSONResponse, Response, HTMLResponse, RedirectResponse
 from pydantic import Field
 from pydantic_settings import BaseSettings
@@ -92,7 +93,13 @@ config = Config()
 # -------------------------------------------------------------
 app = FastAPI()
 sse_handler.app = app
-
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 # -------------------------------------------------------------
 # 3. Global state: per‑endpoint per‑model active connection counters
 # -------------------------------------------------------------
