@@ -995,14 +995,14 @@ async def openai_embedding_proxy(request: Request):
         payload = json.loads(body_bytes.decode("utf-8"))
 
         model = payload.get("model")
-        input = payload.get("input")
+        doc = payload.get("input")
         
 
         if not model:
             raise HTTPException(
                 status_code=400, detail="Missing required field 'model'"
             )
-        if not input:
+        if not doc:
             raise HTTPException(
                 status_code=400, detail="Missing required field 'input'"
             )
@@ -1019,7 +1019,7 @@ async def openai_embedding_proxy(request: Request):
     oclient = openai.AsyncOpenAI(base_url=endpoint+"/v1", api_key=api_key)
 
     # 3. Async generator that streams embedding data and decrements the counter
-    async_gen = await oclient.embeddings.create(input=[input], model=model)
+    async_gen = await oclient.embeddings.create(input=[doc], model=model)
             
     await decrement_usage(endpoint, model)
 
@@ -1060,31 +1060,22 @@ async def openai_chat_completions_proxy(request: Request):
             "model": model,
         }
 
-        if tools is not None:
-            params["tools"] = tools
-        if response_format is not None:
-            params["response_format"] = response_format
-        if stream_options is not None:
-            params["stream_options"] = stream_options
-        if max_completion_tokens is not None:
-            params["max_completion_tokens"] = max_completion_tokens
-        if max_tokens is not None:
-            params["max_tokens"] = max_tokens
-        if temperature is not None:
-            params["temperature"] = temperature
-        if top_p is not None:
-            params["top_p"] = top_p
-        if seed is not None:
-            params["seed"] = seed
-        if presence_penalty is not None:
-            params["presence_penalty"] = presence_penalty
-        if frequency_penalty is not None:
-            params["frequency_penalty"] = frequency_penalty
-        if stop is not None:
-            params["stop"] = stop
-        if stream is not None:
-            params["stream"] = stream
-        
+        optional_params = {
+            "tools": tools,
+            "response_format": response_format,
+            "stream_options": stream_options,
+            "max_completion_tokens": max_completion_tokens,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "top_p": top_p,
+            "seed": seed,
+            "presence_penalty": presence_penalty,
+            "frequency_penalty": frequency_penalty,
+            "stop": stop,
+            "stream": stream,
+        }
+
+        params.update({k: v for k, v in optional_params.items() if v is not None})
         
         if not model:
             raise HTTPException(
@@ -1169,26 +1160,21 @@ async def openai_completions_proxy(request: Request):
             "model": model,
         }
 
-        if stream_options is not None:
-            params["stream_options"] = stream_options
-        if frequency_penalty is not None:
-            params["frequency_penalty"] = frequency_penalty
-        if presence_penalty is not None:
-            params["presence_penalty"] = presence_penalty
-        if seed is not None:
-            params["seed"] = seed
-        if stop is not None:
-            params["stop"] = stop
-        if stream is not None:
-            params["stream"] = stream
-        if temperature is not None:
-            params["temperature"] = temperature
-        if top_p is not None:
-            params["top_p"] = top_p
-        if max_tokens is not None:
-            params["max_tokens"] = max_tokens
-        if suffix is not None:
-            params["suffix"] = suffix
+        optional_params = {
+            "frequency_penalty": frequency_penalty,
+            "presence_penalty": presence_penalty,
+            "seed": seed,
+            "stop": stop,
+            "stream": stream,
+            "stream_options": stream_options,
+            "temperature": temperature,
+            "top_p": top_p,
+            "max_tokens": max_tokens,
+            "max_completion_tokens": max_completion_tokens,
+            "suffix": suffix
+        }
+
+        params.update({k: v for k, v in optional_params.items() if v is not None})
 
         if not model:
             raise HTTPException(
