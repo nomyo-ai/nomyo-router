@@ -269,21 +269,37 @@ def iso8601_ns():
     return iso8601_with_ns
 
 class rechunk:
-    def openai_chat_completion2ollama(chunk: dict, start_ts: float):
-        chunk = {   "model": chunk.model, 
-                                    "created_at": iso8601_ns() ,
-                                    "done_reason": chunk.choices[0].finish_reason, 
-                                    "load_duration": None, 
-                                    "prompt_eval_count": None, 
-                                    "prompt_eval_duration": None, 
-                                    "eval_count": None,
-                                    "eval_duration": None,
-                                    "message": {"role": chunk.choices[0].delta.role, "content": chunk.choices[0].delta.content, "thinking": None, "images": None, "tool_name": None, "tool_calls": None},
-                                    "eval_count":  (chunk.usage.completion_tokens if chunk.usage is not None else None),
-                                    "prompt_eval_count": (chunk.usage.prompt_tokens if chunk.usage is not None else None),
-                                    "eval_duration": (int((time.perf_counter() - start_ts) * 1000) if chunk.usage is not None else None),
-                                    "response_token/s": (round(chunk.usage.total_tokens / (time.perf_counter() - start_ts), 2) if chunk.usage is not None else None)
-                                }
+    def openai_chat_completion2ollama(chunk: dict, stream: bool, start_ts: float):
+        if stream == True:
+            chunk = {   "model": chunk.model, 
+                        "created_at": iso8601_ns() ,
+                        "done_reason": chunk.choices[0].finish_reason, 
+                        "load_duration": None, 
+                        "prompt_eval_count": None, 
+                        "prompt_eval_duration": None, 
+                        "eval_count": None,
+                        "eval_duration": None,
+                        "message": {"role": chunk.choices[0].delta.role, "content": chunk.choices[0].delta.content, "thinking": None, "images": None, "tool_name": None, "tool_calls": None},
+                        "eval_count":  (chunk.usage.completion_tokens if chunk.usage is not None else None),
+                        "prompt_eval_count": (chunk.usage.prompt_tokens if chunk.usage is not None else None),
+                        "eval_duration": (int((time.perf_counter() - start_ts) * 1000) if chunk.usage is not None else None),
+                        "response_token/s": (round(chunk.usage.total_tokens / (time.perf_counter() - start_ts), 2) if chunk.usage is not None else None)
+                    }
+        else:
+            chunk = {   "model": chunk.model, 
+                        "created_at": iso8601_ns() ,
+                        "done_reason": chunk.choices[0].finish_reason, 
+                        "load_duration": None, 
+                        "prompt_eval_count": None, 
+                        "prompt_eval_duration": None, 
+                        "eval_count": None,
+                        "eval_duration": None,
+                        "message": {"role": chunk.choices[0].message.role, "content": chunk.choices[0].message.content, "thinking": None, "images": None, "tool_name": None, "tool_calls": None},
+                        "eval_count":  (chunk.usage.completion_tokens if chunk.usage is not None else None),
+                        "prompt_eval_count": (chunk.usage.prompt_tokens if chunk.usage is not None else None),
+                        "eval_duration": (int((time.perf_counter() - start_ts) * 1000) if chunk.usage is not None else None),
+                        "response_token/s": (round(chunk.usage.total_tokens / (time.perf_counter() - start_ts), 2) if chunk.usage is not None else None)
+                    }
         return chunk
 
 # ------------------------------------------------------------------
@@ -540,7 +556,7 @@ async def chat_proxy(request: Request):
                 async for chunk in async_gen:
                     if is_openai_endpoint:
                         print(chunk)
-                        chunk = rechunk.openai_chat_completion2ollama(chunk, start_ts)
+                        chunk = rechunk.openai_chat_completion2ollama(chunk, stream, start_ts)
                     # `chunk` can be a dict or a pydantic model – dump to JSON safely
                     if hasattr(chunk, "model_dump_json"):
                         json_line = chunk.model_dump_json()
@@ -549,11 +565,17 @@ async def chat_proxy(request: Request):
                     print(json_line)
                     yield json_line.encode("utf-8") + b"\n"
             else:
+                if is_openai_endpoint:
+                    response = rechunk.openai_chat_completion2ollama(async_gen, stream, start_ts)
+                    response = json.dumps(response)
+                else:
+                    repsonse = async_gen.model_dump_json()
                 json_line = (
-                    async_gen.model_dump_json()
+                    response
                     if hasattr(async_gen, "model_dump_json")
                     else json.dumps(async_gen)
                 )
+                print(json_line)
                 yield json_line.encode("utf-8") + b"\n"
 
         finally:
