@@ -219,12 +219,12 @@ class fetch:
             print(e)
             return []
 
-    def ep2base(ep):
-        if "/v1" in ep:
-            base_url = ep
-        else:
-            base_url = ep+"/v1"
-        return base_url
+def ep2base(ep):
+    if "/v1" in ep:
+        base_url = ep
+    else:
+        base_url = ep+"/v1"
+    return base_url
 
 def dedupe_on_keys(dicts, key_fields):
     """
