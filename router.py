@@ -269,7 +269,7 @@ def iso8601_ns():
     return iso8601_with_ns
 
 class rechunk:
-    def openai_chat_completion2ollama(chunk):
+    def openai_chat_completion2ollama(chunk: dict, start_ts: float):
         chunk = {   "model": chunk.model, 
                                     "created_at": iso8601_ns() ,
                                     "done_reason": chunk.choices[0].finish_reason, 
@@ -279,6 +279,10 @@ class rechunk:
                                     "eval_count": None,
                                     "eval_duration": None,
                                     "message": {"role": chunk.choices[0].delta.role, "content": chunk.choices[0].delta.content, "thinking": None, "images": None, "tool_name": None, "tool_calls": None},
+                                    "eval_count":  (chunk.usage.completion_tokens if chunk.usage is not None else None),
+                                    "prompt_eval_count": (chunk.usage.prompt_tokens if chunk.usage is not None else None),
+                                    "eval_duration": (int((time.perf_counter() - start_ts) * 1000) if chunk.usage is not None else None),
+                                    "response_token/s": (round(chunk.usage.total_tokens / (time.perf_counter() - start_ts), 2) if chunk.usage is not None else None)
                                 }
         return chunk
 
@@ -523,18 +527,20 @@ async def chat_proxy(request: Request):
         client = ollama.AsyncClient(host=endpoint)
 
     # 3. Async generator that streams chat data and decrements the counter
+    is_openai_endpoint = "/v1" in endpoint
     async def stream_chat_response():
         try:
             # The chat method returns a generator of dicts (or GenerateResponse)
-            if "/v1" in endpoint:
+            if is_openai_endpoint:
+                start_ts = time.perf_counter()
                 async_gen = await oclient.chat.completions.create(**params)
             else:
                 async_gen = await client.chat(model=model, messages=messages, tools=tools, stream=stream, think=think, format=format, options=options, keep_alive=keep_alive)
             if stream == True:
                 async for chunk in async_gen:
-                    if "/v1" in endpoint:
+                    if is_openai_endpoint:
                         print(chunk)
-                        chunk = rechunk.openai_chat_completion2ollama(chunk)
+                        chunk = rechunk.openai_chat_completion2ollama(chunk, start_ts)
                     # `chunk` can be a dict or a pydantic model – dump to JSON safely
                     if hasattr(chunk, "model_dump_json"):
                         json_line = chunk.model_dump_json()
