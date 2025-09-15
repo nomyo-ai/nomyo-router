@@ -1113,7 +1113,8 @@ async def openai_embedding_proxy(request: Request):
         api_key = config.api_keys[endpoint]
     else:
         api_key = "ollama"
-    oclient = openai.AsyncOpenAI(base_url=endpoint+"/v1", api_key=api_key)
+    base_url = ep2base(endpoint)
+    oclient = openai.AsyncOpenAI(base_url=base_url, api_key=api_key)
 
     # 3. Async generator that streams embedding data and decrements the counter
     async_gen = await oclient.embeddings.create(input=[doc], model=model)
