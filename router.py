@@ -1042,6 +1042,10 @@ async def tags_proxy(request: Request):
                 model['model'] = model['id']
             else:
                 model['id'] = model['model']
+            if not "name" in model.keys():  # Relable OpenAI models with Ollama Model.name from Model.model to have model,name keys
+                model['name'] = model['model']
+            else:
+                model['id'] = model['model']
         models['models'] += modellist
     
     # 2. Return a JSONResponse with a deduplicated list of unique models for inference
