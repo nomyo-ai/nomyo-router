@@ -395,7 +395,7 @@ async def choose_endpoint(model: str) -> str:
     # 6️⃣ 
     if not candidate_endpoints:
         if ":latest" in model:  #ollama naming convention not applicable to openai
-            model = model.split(":")
+            model = model.split(":latest")
             model = model[0]
             candidate_endpoints = [
                 ep for ep, models in zip(config.endpoints, advertised_sets)
@@ -483,7 +483,7 @@ async def proxy(request: Request):
     is_openai_endpoint = "/v1" in endpoint
     if is_openai_endpoint:
         if ":latest" in model:
-            model = model.split(":")
+            model = model.split(":latest")
             model = model[0]
         params = {
             "prompt": prompt, 
@@ -578,7 +578,7 @@ async def chat_proxy(request: Request):
     is_openai_endpoint = "/v1" in endpoint
     if is_openai_endpoint:
         if ":latest" in model:
-            model = model.split(":")
+            model = model.split(":latest")
             model = model[0]
         params = {
             "messages": messages, 
@@ -672,7 +672,7 @@ async def embedding_proxy(request: Request):
     is_openai_endpoint = "/v1" in endpoint
     if is_openai_endpoint:
         if ":latest" in model:
-            model = model.split(":")
+            model = model.split(":latest")
             model = model[0]
         client = openai.AsyncOpenAI(base_url=endpoint, api_key=config.api_keys[endpoint])
     else:
@@ -738,7 +738,7 @@ async def embed_proxy(request: Request):
     is_openai_endpoint = "/v1" in endpoint
     if is_openai_endpoint:
         if ":latest" in model:
-            model = model.split(":")
+            model = model.split(":latest")
             model = model[0]
         client = openai.AsyncOpenAI(base_url=endpoint, api_key=config.api_keys[endpoint])
     else:
@@ -1056,7 +1056,7 @@ async def tags_proxy(request: Request):
     for modellist in all_models:
         for model in modellist:
             if not "model" in model.keys():  # Relable OpenAI models with Ollama Model.model from Model.id
-                model['model'] = model['id']
+                model['model'] = model['id'] + ":latest"
             else:
                 model['id'] = model['model']
             if not "name" in model.keys():  # Relable OpenAI models with Ollama Model.name from Model.model to have model,name keys
