@@ -397,7 +397,6 @@ async def choose_endpoint(model: str) -> str:
         if ":latest" in model:  #ollama naming convention not applicable to openai
             model = model.split(":")
             model = model[0]
-            print(model)
             candidate_endpoints = [
                 ep for ep, models in zip(config.endpoints, advertised_sets)
                 if model in models
@@ -670,13 +669,15 @@ async def embedding_proxy(request: Request):
 
     # 2. Endpoint logic
     endpoint = await choose_endpoint(model)
-    await increment_usage(endpoint, model)
     is_openai_endpoint = "/v1" in endpoint
     if is_openai_endpoint:
+        if ":latest" in model:
+            model = model.split(":")
+            model = model[0]
         client = openai.AsyncOpenAI(base_url=endpoint, api_key=config.api_keys[endpoint])
     else:
         client = ollama.AsyncClient(host=endpoint)
-
+    await increment_usage(endpoint, model)
     # 3. Async generator that streams embedding data and decrements the counter
     async def stream_embedding_response():
         try:
@@ -734,13 +735,15 @@ async def embed_proxy(request: Request):
 
     # 2. Endpoint logic
     endpoint = await choose_endpoint(model)
-    await increment_usage(endpoint, model)
     is_openai_endpoint = "/v1" in endpoint
     if is_openai_endpoint:
+        if ":latest" in model:
+            model = model.split(":")
+            model = model[0]
         client = openai.AsyncOpenAI(base_url=endpoint, api_key=config.api_keys[endpoint])
     else:
         client = ollama.AsyncClient(host=endpoint)
-
+    await increment_usage(endpoint, model)
     # 3. Async generator that streams embed data and decrements the counter
     async def stream_embedding_response():
         try:
