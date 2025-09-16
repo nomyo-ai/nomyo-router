@@ -285,9 +285,9 @@ class rechunk:
                     "response_token/s": (round(chunk.usage.total_tokens / (time.perf_counter() - start_ts), 2) if chunk.usage is not None else None)
                 }
         if stream == True:
-            rechunk["message"] = {"role": chunk.choices[0].delta.role, "content": chunk.choices[0].delta.content, "thinking": None, "images": None, "tool_name": None, "tool_calls": None}
+            rechunk["message"] = {"role": chunk.choices[0].delta.role or "assistant", "content": chunk.choices[0].delta.content, "thinking": None, "images": None, "tool_name": None, "tool_calls": None}
         else:
-            rechunk["message"] = {"role": chunk.choices[0].message.role, "content": chunk.choices[0].message.content, "thinking": None, "images": None, "tool_name": None, "tool_calls": None}
+            rechunk["message"] = {"role": chunk.choices[0].message.role or "assistant", "content": chunk.choices[0].message.content, "thinking": None, "images": None, "tool_name": None, "tool_calls": None}
         return rechunk
     
     def openai_completion2ollama(chunk: dict, stream: bool, start_ts: float):
@@ -297,7 +297,7 @@ class rechunk:
                                     "done_reason": chunk.choices[0].finish_reason,
                                     "total_duration": None, 
                                     "eval_duration": (int((time.perf_counter() - start_ts) * 1000) if chunk.usage is not None else None),
-                                    "thinking": None,
+                                    "thinking": chunk.choices[0].reasoning or None,
                                     "context": None,
                                     "response": chunk.choices[0].text
             }
