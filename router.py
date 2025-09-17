@@ -291,13 +291,15 @@ class rechunk:
         return rechunk
     
     def openai_completion2ollama(chunk: dict, stream: bool, start_ts: float):
+        with_thinking = chunk.choices[0] if chunk.choices[0] else None
+        thinking = getattr(with_thinking, "reasoning", None) if with_thinking else None
         rechunk = { "model": chunk.model,
                                     "created_at": iso8601_ns(),
                                     "load_duration": None,
                                     "done_reason": chunk.choices[0].finish_reason,
                                     "total_duration": None, 
                                     "eval_duration": (int((time.perf_counter() - start_ts) * 1000) if chunk.usage is not None else None),
-                                    "thinking": chunk.choices[0].reasoning or None,
+                                    "thinking": thinking,
                                     "context": None,
                                     "response": chunk.choices[0].text
             }
@@ -1213,6 +1215,10 @@ async def openai_chat_completions_proxy(request: Request):
         max_completion_tokens = payload.get("max_completion_tokens")
         tools = payload.get("tools")
 
+        if ":latest" in model:
+            model = model.split(":latest")
+            model = model[0]
+
         params = {
             "messages": messages, 
             "model": model,
@@ -1312,6 +1318,10 @@ async def openai_completions_proxy(request: Request):
         max_tokens = payload.get("max_tokens")
         max_completion_tokens = payload.get("max_completion_tokens")
         suffix = payload.get("suffix")
+
+        if ":latest" in model:
+            model = model.split(":latest")
+            model = model[0]
 
         params = {
             "prompt": prompt, 

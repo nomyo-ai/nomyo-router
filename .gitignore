@@ -63,3 +63,6 @@ cython_debug/
 # Logfile(s)
 *.log
 *.sqlite3
+
+# Config
+config.yaml
