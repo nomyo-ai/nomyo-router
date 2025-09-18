@@ -6,7 +6,7 @@ version: 0.3
 license: AGPL
 """
 # -------------------------------------------------------------
-import json, time, asyncio, yaml, ollama, openai, os, re, aiohttp, ssl, datetime
+import json, time, asyncio, yaml, ollama, openai, os, re, aiohttp, ssl, datetime, random
 from pathlib import Path
 from typing import Dict, Set, List, Optional
 from fastapi import FastAPI, Request, HTTPException
@@ -376,11 +376,12 @@ async def choose_endpoint(model: str) -> str:
     1️⃣  Query every endpoint for its advertised models (`/api/tags`).
     2️⃣  Build a list of endpoints that contain the requested model.
     3️⃣  For those endpoints, find those that have the model loaded
-         (`/api/ps`) *and* still have a free slot.
+        (`/api/ps`) *and* still have a free slot.
     4️⃣  If none are both loaded and free, fall back to any endpoint
-         from the filtered list that simply has a free slot.
+        from the filtered list that simply has a free slot and randomly 
+        select one.
     5️⃣  If all are saturated, pick any endpoint from the filtered list
-         (the request will queue on that endpoint).
+        (the request will queue on that endpoint).
     6️⃣  If no endpoint advertises the model at all, raise an error.
     """
     # 1️⃣  Gather advertised‑model sets for all endpoints concurrently
@@ -436,8 +437,7 @@ async def choose_endpoint(model: str) -> str:
         ]
 
         if endpoints_with_free_slot:
-            ep = min(endpoints_with_free_slot, key=current_usage)
-            return ep
+            return random.choice(endpoints_with_free_slot)
 
         # 5️⃣ All candidate endpoints are saturated – pick one with lowest usages count (will queue)
         ep = min(candidate_endpoints, key=current_usage)
