@@ -18,9 +18,19 @@ endpoints:
   - http://ollama0:11434
   - http://ollama1:11434
   - http://ollama2:11434
+  - https://api.openai.com/v1
 
 # Maximum concurrent connections *per endpoint‑model pair*
 max_concurrent_connections: 2
+
+# API keys for remote endpoints
+# Set an environment variable like OPENAI_KEY
+# Confirm endpoints are exactly as in endpoints block
+api_keys:
+  "http://192.168.0.50:11434": "ollama"
+  "http://192.168.0.51:11434": "ollama"
+  "http://192.168.0.52:11434": "ollama"
+  "https://api.openai.com/v1": "${OPENAI_KEY}"
 ```
 
 Run the NOMYO Router in a dedicated virtual environment, install the requirements and run with uvicorn:
@@ -30,6 +40,13 @@ python3 -m venv .venv/router
 source .venv/router/bin/activate
 pip3 install -r requirements.txt
 ```
+
+on the shell do:
+
+```
+export OPENAI_KEY=YOUR_SECRET_API_KEY
+```
+
 finally you can
 
 ```
