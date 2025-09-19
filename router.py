@@ -327,12 +327,16 @@ class rechunk:
 # SSE Helpser
 # ------------------------------------------------------------------
 async def publish_snapshot():
-    snapshot = json.dumps({"usage_counts": usage_counts})
+    async with usage_lock:
+        snapshot = json.dumps({"usage_counts": usage_counts})
     async with _subscribers_lock:
         for q in _subscribers:
             # If the queue is full, drop the message to avoid back‑pressure.
             if q.full():
-                continue
+                try:
+                    await q.get()
+                except asyncio.QueueEmpty:
+                    pass
             await q.put(snapshot)
 
 async def close_all_sse_queues():
