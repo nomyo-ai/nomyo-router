@@ -277,48 +277,44 @@ def iso8601_ns():
 class rechunk:
     def openai_chat_completion2ollama(chunk: dict, stream: bool, start_ts: float):
         if stream == True:
-            assistant_msg = ollama.Message(
-                role=chunk.choices[0].delta.role or "assistant",
-                content=chunk.choices[0].delta.content,
-                thinking=None,
-                images=None,
-                tool_name=None,
-                tool_calls=None
-            )
+            role = chunk.choices[0].delta.role or "assistant"
+            content = chunk.choices[0].delta.content
         else:
-            assistant_msg = ollama.Message(
-                role=chunk.choices[0].message.role or "assistant",
-                content=chunk.choices[0].message.content,
-                thinking=None,
-                images=None,
-                tool_name=None,
-                tool_calls=None
-            )
-        rechunk = ollama.ChatResponse(model=chunk.model, 
-                    created_at=iso8601_ns(),
-                    done_reason=chunk.choices[0].finish_reason, 
-                    load_duration=100000, 
-                    prompt_eval_duration=(int((time.perf_counter() - start_ts) * 1_000_000_000 * (chunk.usage.prompt_tokens / chunk.usage.completion_tokens / 100)) if chunk.usage is not None else None), 
-                    eval_count= (chunk.usage.completion_tokens if chunk.usage is not None else None),
-                    prompt_eval_count=(chunk.usage.prompt_tokens if chunk.usage is not None else None),
-                    eval_duration=(int((time.perf_counter() - start_ts) * 1_000_000_000) if chunk.usage is not None else None),
-                    total_duration=(int((time.perf_counter() - start_ts) * 1_000_000_000) if chunk.usage is not None else None),
-                    message=assistant_msg)
+            role = chunk.choices[0].message.role or "assistant"
+            content = chunk.choices[0].message.content
+        assistant_msg = ollama.Message(
+            role=role,
+            content=content,
+            thinking=None,
+            images=None,
+            tool_name=None,
+            tool_calls=None)
+        rechunk = ollama.ChatResponse(
+            model=chunk.model, 
+            created_at=iso8601_ns(),
+            done_reason=chunk.choices[0].finish_reason, 
+            load_duration=100000, 
+            prompt_eval_duration=(int((time.perf_counter() - start_ts) * 1_000_000_000 * (chunk.usage.prompt_tokens / chunk.usage.completion_tokens / 100)) if chunk.usage is not None else None), 
+            eval_count= (chunk.usage.completion_tokens if chunk.usage is not None else None),
+            prompt_eval_count=(chunk.usage.prompt_tokens if chunk.usage is not None else None),
+            eval_duration=(int((time.perf_counter() - start_ts) * 1_000_000_000) if chunk.usage is not None else None),
+            total_duration=(int((time.perf_counter() - start_ts) * 1_000_000_000) if chunk.usage is not None else None),
+            message=assistant_msg)
         return rechunk
     
     def openai_completion2ollama(chunk: dict, stream: bool, start_ts: float):
         with_thinking = chunk.choices[0] if chunk.choices[0] else None
         thinking = getattr(with_thinking, "reasoning", None) if with_thinking else None
-        rechunk = ollama.GenerateResponse(model=chunk.model,
-                                      created_at=iso8601_ns(),
-                                      load_duration=10000,
-                                      done_reason=chunk.choices[0].finish_reason,
-                                      done=None, #True if chunk.choices[0].finish_reason is not None else False,
-                                      total_duration=(int((time.perf_counter() - start_ts) * 1000) if chunk.usage is not None else None),
-                                      eval_duration=(int((time.perf_counter() - start_ts) * 1000) if chunk.usage is not None else None),
-                                      thinking=thinking,
-                                      response=chunk.choices[0].text
-                    )
+        rechunk = ollama.GenerateResponse(
+            model=chunk.model,
+            created_at=iso8601_ns(),
+            load_duration=10000,
+            done_reason=chunk.choices[0].finish_reason,
+            done=None, #True if chunk.choices[0].finish_reason is not None else False,
+            total_duration=(int((time.perf_counter() - start_ts) * 1000) if chunk.usage is not None else None),
+            eval_duration=(int((time.perf_counter() - start_ts) * 1000) if chunk.usage is not None else None),
+            thinking=thinking,
+            response=chunk.choices[0].text)
         return rechunk
     
     def openai_embeddings2ollama(chunk: dict):
@@ -326,18 +322,18 @@ class rechunk:
         return rechunk
 
     def openai_embed2ollama(chunk: dict, model: str):
-        rechunk = ollama.EmbedResponse(model=model,
-                                    created_at=iso8601_ns(),
-                                    done=None,
-                                    done_reason=None,
-                                    total_duration=None,
-                                    load_duration=None,
-                                    prompt_eval_count=None,
-                                    prompt_eval_duration=None,
-                                    eval_count=None,
-                                    eval_duration=None,
-                                    embeddings=[chunk.data[0].embedding]
-                )
+        rechunk = ollama.EmbedResponse(
+            model=model,
+            created_at=iso8601_ns(),
+            done=None,
+            done_reason=None,
+            total_duration=None,
+            load_duration=None,
+            prompt_eval_count=None,
+            prompt_eval_duration=None,
+            eval_count=None,
+            eval_duration=None,
+            embeddings=[chunk.data[0].embedding])
         return rechunk
 # ------------------------------------------------------------------
 # SSE Helpser
