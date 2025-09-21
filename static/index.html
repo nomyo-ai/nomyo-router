@@ -346,7 +346,7 @@
                     const body = document.getElementById("tags-body");
                     body.innerHTML = data.models
                         .map((m) => {
-                            let modelCell = `${m.id || m.name}`;
+                            let modelCell = `${m.model}`;
                             if (m.digest) {
                                 modelCell += `<a href="#" class="delete-link" data-model="${m.name}">delete</a>`;
                                 modelCell += `<a href="#" class="copy-link" data-source="${m.name}">copy</a>`;
