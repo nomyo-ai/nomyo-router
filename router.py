@@ -294,7 +294,7 @@ class rechunk:
         rechunk = ollama.ChatResponse(
             model=chunk.model, 
             created_at=iso8601_ns(),
-            done=False, #True if chunk.choices[0].finish_reason is not None else False,
+            done=True if chunk.choices[0].finish_reason is not None else False,
             done_reason=chunk.choices[0].finish_reason, 
             total_duration=(int((time.perf_counter() - start_ts) * 1_000_000_000) if chunk.usage is not None else None),
             load_duration=100000, 
@@ -341,6 +341,7 @@ class rechunk:
             eval_duration=None,
             embeddings=[chunk.data[0].embedding])
         return rechunk
+    
 # ------------------------------------------------------------------
 # SSE Helpser
 # ------------------------------------------------------------------
@@ -490,7 +491,7 @@ async def proxy(request: Request):
         images = payload.get("images")
         options = payload.get("options")
         keep_alive = payload.get("keep_alive")
-
+        
         if not model:
             raise HTTPException(
                 status_code=400, detail="Missing required field 'model'"
@@ -516,8 +517,15 @@ async def proxy(request: Request):
 
         optional_params = {
             "stream": stream,
-        }
-
+            "max_tokens": options.get("num_predict") if options and "num_predict" in options else None,
+            "frequency_penalty": options.get("frequency_penalty") if options and "frequency_penalty" in options else None,
+            "presence_penalty": options.get("presence_penalty") if options and "presence_penalty" in options else None,
+            "seed": options.get("seed") if options and "seed" in options else None,
+            "stop": options.get("stop") if options and "stop" in options else None,
+            "top_p": options.get("top_p") if options and "top_p" in options else None,
+            "temperature": options.get("temperature") if options and "temperature" in options else None,
+            "sufix": suffix,
+            }
         params.update({k: v for k, v in optional_params.items() if v is not None})
         oclient = openai.AsyncOpenAI(base_url=endpoint, default_headers=default_headers, api_key=config.api_keys[endpoint])
     else:
@@ -576,7 +584,7 @@ async def chat_proxy(request: Request):
     try:
         body_bytes = await request.body()
         payload = json.loads(body_bytes.decode("utf-8"))
-        print(payload)
+
         model = payload.get("model")
         messages = payload.get("messages")
         tools = payload.get("tools")
@@ -586,7 +594,7 @@ async def chat_proxy(request: Request):
         options = payload.get("options")
         keep_alive = payload.get("keep_alive")
         options = payload.get("options")
-
+        
         if not model:
             raise HTTPException(
                 status_code=400, detail="Missing required field 'model'"
@@ -612,12 +620,19 @@ async def chat_proxy(request: Request):
         params = {
             "messages": messages, 
             "model": model,
-        }
-
+            }
         optional_params = {
             "tools": tools,
             "stream": stream,
-        }
+            "max_tokens": options.get("num_predict") if options and "num_predict" in options else None,
+            "frequency_penalty": options.get("frequency_penalty") if options and "frequency_penalty" in options else None,
+            "presence_penalty": options.get("presence_penalty") if options and "presence_penalty" in options else None,
+            "seed": options.get("seed") if options and "seed" in options else None,
+            "stop": options.get("stop") if options and "stop" in options else None,
+            "top_p": options.get("top_p") if options and "top_p" in options else None,
+            "temperature": options.get("temperature") if options and "temperature" in options else None,
+            "response_format": {"type": "json_schema", "json_schema": _format} if _format is not None else None
+            }
         params.update({k: v for k, v in optional_params.items() if v is not None})
         oclient = openai.AsyncOpenAI(base_url=endpoint, default_headers=default_headers, api_key=config.api_keys[endpoint])
     else:
@@ -638,6 +653,7 @@ async def chat_proxy(request: Request):
                     if is_openai_endpoint:
                         chunk = rechunk.openai_chat_completion2ollama(chunk, stream, start_ts)
                     # `chunk` can be a dict or a pydantic model – dump to JSON safely
+                    print(chunk)
                     if hasattr(chunk, "model_dump_json"):
                         json_line = chunk.model_dump_json()
                     else:
