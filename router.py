@@ -277,13 +277,14 @@ def iso8601_ns():
 class rechunk:
     def openai_chat_completion2ollama(chunk: dict, stream: bool, start_ts: float) -> ollama.ChatResponse:
         with_thinking = chunk.choices[0] if chunk.choices[0] else None
-        thinking = getattr(with_thinking, "reasoning", None) if with_thinking else None
         if stream == True:
+            thinking = getattr(with_thinking.delta, "reasoning", None) if with_thinking else None
             role = chunk.choices[0].delta.role or "assistant"
-            content = chunk.choices[0].delta.content
+            content = chunk.choices[0].delta.content or "" 
         else:
+            thinking = getattr(with_thinking, "reasoning", None) if with_thinking else None
             role = chunk.choices[0].message.role or "assistant"
-            content = chunk.choices[0].message.content
+            content = chunk.choices[0].message.content or ""
         assistant_msg = ollama.Message(
             role=role,
             content=content,
@@ -296,12 +297,12 @@ class rechunk:
             created_at=iso8601_ns(),
             done=True if chunk.choices[0].finish_reason is not None else False,
             done_reason=chunk.choices[0].finish_reason, 
-            total_duration=(int((time.perf_counter() - start_ts) * 1_000_000_000) if chunk.usage is not None else None),
+            total_duration=int((time.perf_counter() - start_ts) * 1_000_000_000) if chunk.usage is not None else 0,
             load_duration=100000, 
-            prompt_eval_count=(chunk.usage.prompt_tokens if chunk.usage is not None else None),
-            prompt_eval_duration=(int((time.perf_counter() - start_ts) * 1_000_000_000 * (chunk.usage.prompt_tokens / chunk.usage.completion_tokens / 100)) if chunk.usage is not None else None), 
-            eval_count= (chunk.usage.completion_tokens if chunk.usage is not None else None),
-            eval_duration=(int((time.perf_counter() - start_ts) * 1_000_000_000) if chunk.usage is not None else None),
+            prompt_eval_count=int(chunk.usage.prompt_tokens) if chunk.usage is not None else 0,
+            prompt_eval_duration=int((time.perf_counter() - start_ts) * 1_000_000_000 * (chunk.usage.prompt_tokens / chunk.usage.completion_tokens / 100)) if chunk.usage is not None else 0, 
+            eval_count=int(chunk.usage.completion_tokens) if chunk.usage is not None else 0,
+            eval_duration=int((time.perf_counter() - start_ts) * 1_000_000_000) if chunk.usage is not None else 0,
             message=assistant_msg)
         return rechunk
     
@@ -313,13 +314,13 @@ class rechunk:
             created_at=iso8601_ns(),
             done=False, #True if chunk.choices[0].finish_reason is not None else False,
             done_reason=chunk.choices[0].finish_reason,
-            total_duration=(int((time.perf_counter() - start_ts) * 1000) if chunk.usage is not None else None),
+            total_duration=int((time.perf_counter() - start_ts) * 1000) if chunk.usage is not None else 0,
             load_duration=10000,
-            prompt_eval_count=None,
-            prompt_eval_duration=(int((time.perf_counter() - start_ts) * 1_000_000_000 * (chunk.usage.prompt_tokens / chunk.usage.completion_tokens / 100)) if chunk.usage is not None else None),
-            eval_count=None,
-            eval_duration=(int((time.perf_counter() - start_ts) * 1000) if chunk.usage is not None else None),
-            response=chunk.choices[0].text,
+            prompt_eval_count=0,
+            prompt_eval_duration=int((time.perf_counter() - start_ts) * 1_000_000_000 * (chunk.usage.prompt_tokens / chunk.usage.completion_tokens / 100)) if chunk.usage is not None else 0,
+            eval_count=0,
+            eval_duration=int((time.perf_counter() - start_ts) * 1000) if chunk.usage is not None else 0,
+            response=chunk.choices[0].text or "",
             thinking=thinking)
         return rechunk
     
@@ -591,7 +592,6 @@ async def chat_proxy(request: Request):
         stream = payload.get("stream")
         think = payload.get("think")
         _format = payload.get("format")
-        options = payload.get("options")
         keep_alive = payload.get("keep_alive")
         options = payload.get("options")
         
@@ -634,6 +634,7 @@ async def chat_proxy(request: Request):
             "response_format": {"type": "json_schema", "json_schema": _format} if _format is not None else None
             }
         params.update({k: v for k, v in optional_params.items() if v is not None})
+        print(params)
         oclient = openai.AsyncOpenAI(base_url=endpoint, default_headers=default_headers, api_key=config.api_keys[endpoint])
     else:
         client = ollama.AsyncClient(host=endpoint)
@@ -667,8 +668,8 @@ async def chat_proxy(request: Request):
                     response = async_gen.model_dump_json()
                 json_line = (
                     response
-                    if hasattr(response, "model_dump_json")
-                    else json.dumps(response)
+                    if hasattr(async_gen, "model_dump_json")
+                    else json.dumps(async_gen)
                 )
                 yield json_line.encode("utf-8") + b"\n"
 
@@ -677,9 +678,10 @@ async def chat_proxy(request: Request):
             await decrement_usage(endpoint, model)
 
     # 4. Return a StreamingResponse backed by the generator
+    media_type = "application/x-ndjson" if stream else "application/json"
     return StreamingResponse(
         stream_chat_response(),
-        media_type="application/json",
+        media_type=media_type,
     )
 
 # -------------------------------------------------------------
