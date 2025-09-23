@@ -314,7 +314,7 @@ class rechunk:
             total_duration=int((time.perf_counter() - start_ts) * 1_000_000_000) if chunk.usage is not None else 0,
             load_duration=100000, 
             prompt_eval_count=int(chunk.usage.prompt_tokens) if chunk.usage is not None else 0,
-            prompt_eval_duration=int((time.perf_counter() - start_ts) * 1_000_000_000 * (chunk.usage.prompt_tokens / chunk.usage.completion_tokens / 100)) if chunk.usage is not None else 0, 
+            prompt_eval_duration=int((time.perf_counter() - start_ts) * 1_000_000_000 * (chunk.usage.prompt_tokens / chunk.usage.completion_tokens / 100)) if chunk.usage is not None and chunk.usage.completion_tokens != 0 else 0, 
             eval_count=int(chunk.usage.completion_tokens) if chunk.usage is not None else 0,
             eval_duration=int((time.perf_counter() - start_ts) * 1_000_000_000) if chunk.usage is not None else 0,
             message=assistant_msg)
@@ -331,7 +331,7 @@ class rechunk:
             total_duration=int((time.perf_counter() - start_ts) * 1000) if chunk.usage is not None else 0,
             load_duration=10000,
             prompt_eval_count=int(chunk.usage.prompt_tokens) if chunk.usage is not None else 0,
-            prompt_eval_duration=int((time.perf_counter() - start_ts) * 1_000_000_000 * (chunk.usage.prompt_tokens / chunk.usage.completion_tokens / 100)) if chunk.usage is not None else 0,
+            prompt_eval_duration=int((time.perf_counter() - start_ts) * 1_000_000_000 * (chunk.usage.prompt_tokens / chunk.usage.completion_tokens / 100)) if chunk.usage is not None and chunk.usage.completion_tokens != 0 else 0,
             eval_count=int(chunk.usage.completion_tokens) if chunk.usage is not None else 0,
             eval_duration=int((time.perf_counter() - start_ts) * 1000) if chunk.usage is not None else 0,
             response=chunk.choices[0].text or '',
@@ -664,9 +664,11 @@ async def chat_proxy(request: Request):
                 async_gen = await client.chat(model=model, messages=messages, tools=tools, stream=stream, think=think, format=_format, options=options, keep_alive=keep_alive)
             if stream == True:
                 async for chunk in async_gen:
+                    print(chunk)
                     if is_openai_endpoint:
                         chunk = rechunk.openai_chat_completion2ollama(chunk, stream, start_ts)
                     # `chunk` can be a dict or a pydantic model – dump to JSON safely
+                    print(chunk)
                     if hasattr(chunk, "model_dump_json"):
                         json_line = chunk.model_dump_json()
                     else:
