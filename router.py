@@ -276,15 +276,29 @@ def iso8601_ns():
 
 class rechunk:
     def openai_chat_completion2ollama(chunk: dict, stream: bool, start_ts: float) -> ollama.ChatResponse:
+        if chunk.choices == [] and chunk.usage is not None:
+            return ollama.ChatResponse(
+                model=chunk.model,
+                created_at=iso8601_ns(),
+                done=True,
+                done_reason='stop',
+                total_duration=int((time.perf_counter() - start_ts) * 1_000_000_000),
+                load_duration=100000, 
+                prompt_eval_count=int(chunk.usage.prompt_tokens),
+                prompt_eval_duration=int((time.perf_counter() - start_ts) * 1_000_000_000 * (chunk.usage.prompt_tokens / chunk.usage.completion_tokens / 100)), 
+                eval_count=int(chunk.usage.completion_tokens),
+                eval_duration=int((time.perf_counter() - start_ts) * 1_000_000_000),
+                message={"role": "assistant"}
+                )
         with_thinking = chunk.choices[0] if chunk.choices[0] else None
         if stream == True:
             thinking = getattr(with_thinking.delta, "reasoning", None) if with_thinking else None
             role = chunk.choices[0].delta.role or "assistant"
-            content = chunk.choices[0].delta.content or "" 
+            content = chunk.choices[0].delta.content or ''
         else:
             thinking = getattr(with_thinking, "reasoning", None) if with_thinking else None
             role = chunk.choices[0].message.role or "assistant"
-            content = chunk.choices[0].message.content or ""
+            content = chunk.choices[0].message.content or ''
         assistant_msg = ollama.Message(
             role=role,
             content=content,
@@ -295,8 +309,8 @@ class rechunk:
         rechunk = ollama.ChatResponse(
             model=chunk.model, 
             created_at=iso8601_ns(),
-            done=True if chunk.choices[0].finish_reason is not None else False,
-            done_reason=chunk.choices[0].finish_reason, 
+            done=True if chunk.usage is not None else False,
+            done_reason=chunk.choices[0].finish_reason, #if chunk.choices[0].finish_reason is not None else None,
             total_duration=int((time.perf_counter() - start_ts) * 1_000_000_000) if chunk.usage is not None else 0,
             load_duration=100000, 
             prompt_eval_count=int(chunk.usage.prompt_tokens) if chunk.usage is not None else 0,
@@ -312,15 +326,15 @@ class rechunk:
         rechunk = ollama.GenerateResponse(
             model=chunk.model,
             created_at=iso8601_ns(),
-            done=False, #True if chunk.choices[0].finish_reason is not None else False,
+            done=True if chunk.usage is not None else False,
             done_reason=chunk.choices[0].finish_reason,
             total_duration=int((time.perf_counter() - start_ts) * 1000) if chunk.usage is not None else 0,
             load_duration=10000,
-            prompt_eval_count=0,
+            prompt_eval_count=int(chunk.usage.prompt_tokens) if chunk.usage is not None else 0,
             prompt_eval_duration=int((time.perf_counter() - start_ts) * 1_000_000_000 * (chunk.usage.prompt_tokens / chunk.usage.completion_tokens / 100)) if chunk.usage is not None else 0,
-            eval_count=0,
+            eval_count=int(chunk.usage.completion_tokens) if chunk.usage is not None else 0,
             eval_duration=int((time.perf_counter() - start_ts) * 1000) if chunk.usage is not None else 0,
-            response=chunk.choices[0].text or "",
+            response=chunk.choices[0].text or '',
             thinking=thinking)
         return rechunk
     
@@ -624,6 +638,7 @@ async def chat_proxy(request: Request):
         optional_params = {
             "tools": tools,
             "stream": stream,
+            "stream_options": {"include_usage": True} if stream is not None else None,
             "max_tokens": options.get("num_predict") if options and "num_predict" in options else None,
             "frequency_penalty": options.get("frequency_penalty") if options and "frequency_penalty" in options else None,
             "presence_penalty": options.get("presence_penalty") if options and "presence_penalty" in options else None,
@@ -634,7 +649,6 @@ async def chat_proxy(request: Request):
             "response_format": {"type": "json_schema", "json_schema": _format} if _format is not None else None
             }
         params.update({k: v for k, v in optional_params.items() if v is not None})
-        print(params)
         oclient = openai.AsyncOpenAI(base_url=endpoint, default_headers=default_headers, api_key=config.api_keys[endpoint])
     else:
         client = ollama.AsyncClient(host=endpoint)
@@ -650,11 +664,9 @@ async def chat_proxy(request: Request):
                 async_gen = await client.chat(model=model, messages=messages, tools=tools, stream=stream, think=think, format=_format, options=options, keep_alive=keep_alive)
             if stream == True:
                 async for chunk in async_gen:
-                    print(chunk)
                     if is_openai_endpoint:
                         chunk = rechunk.openai_chat_completion2ollama(chunk, stream, start_ts)
                     # `chunk` can be a dict or a pydantic model – dump to JSON safely
-                    print(chunk)
                     if hasattr(chunk, "model_dump_json"):
                         json_line = chunk.model_dump_json()
                     else:
@@ -1315,9 +1327,10 @@ async def openai_chat_completions_proxy(request: Request):
                         if hasattr(chunk, "model_dump_json")
                         else json.dumps(chunk)
                     )
-                    yield f"data: {data}\n\n".encode("utf-8")
+                    if chunk.choices[0].delta.content is not None:
+                        yield f"data: {data}\n\n".encode("utf-8")
                 # Final DONE event
-                yield b"data: [DONE]\n\n"
+                #yield b"data: [DONE]\n\n"
             else:
                 json_line = (
                     async_gen.model_dump_json()
