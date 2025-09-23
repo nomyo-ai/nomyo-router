@@ -664,11 +664,9 @@ async def chat_proxy(request: Request):
                 async_gen = await client.chat(model=model, messages=messages, tools=tools, stream=stream, think=think, format=_format, options=options, keep_alive=keep_alive)
             if stream == True:
                 async for chunk in async_gen:
-                    print(chunk)
                     if is_openai_endpoint:
                         chunk = rechunk.openai_chat_completion2ollama(chunk, stream, start_ts)
                     # `chunk` can be a dict or a pydantic model – dump to JSON safely
-                    print(chunk)
                     if hasattr(chunk, "model_dump_json"):
                         json_line = chunk.model_dump_json()
                     else:
