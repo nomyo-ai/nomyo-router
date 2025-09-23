@@ -275,70 +275,88 @@ def iso8601_ns():
     return iso8601_with_ns
 
 class rechunk:
-    def openai_chat_completion2ollama(chunk: dict, stream: bool, start_ts: float):
+    def openai_chat_completion2ollama(chunk: dict, stream: bool, start_ts: float) -> ollama.ChatResponse:
+        if chunk.choices == [] and chunk.usage is not None:
+            return ollama.ChatResponse(
+                model=chunk.model,
+                created_at=iso8601_ns(),
+                done=True,
+                done_reason='stop',
+                total_duration=int((time.perf_counter() - start_ts) * 1_000_000_000),
+                load_duration=100000, 
+                prompt_eval_count=int(chunk.usage.prompt_tokens),
+                prompt_eval_duration=int((time.perf_counter() - start_ts) * 1_000_000_000 * (chunk.usage.prompt_tokens / chunk.usage.completion_tokens / 100)), 
+                eval_count=int(chunk.usage.completion_tokens),
+                eval_duration=int((time.perf_counter() - start_ts) * 1_000_000_000),
+                message={"role": "assistant"}
+                )
+        with_thinking = chunk.choices[0] if chunk.choices[0] else None
         if stream == True:
-            assistant_msg = ollama.Message(
-                role=chunk.choices[0].delta.role or "assistant",
-                content=chunk.choices[0].delta.content,
-                thinking=None,
-                images=None,
-                tool_name=None,
-                tool_calls=None
-            )
+            thinking = getattr(with_thinking.delta, "reasoning", None) if with_thinking else None
+            role = chunk.choices[0].delta.role or "assistant"
+            content = chunk.choices[0].delta.content or ''
         else:
-            assistant_msg = ollama.Message(
-                role=chunk.choices[0].message.role or "assistant",
-                content=chunk.choices[0].message.content,
-                thinking=None,
-                images=None,
-                tool_name=None,
-                tool_calls=None
-            )
-        rechunk = ollama.ChatResponse(model=chunk.model, 
-                    created_at=iso8601_ns(),
-                    done_reason=chunk.choices[0].finish_reason, 
-                    load_duration=100000, 
-                    prompt_eval_duration=(int((time.perf_counter() - start_ts) * 1_000_000_000 * (chunk.usage.prompt_tokens / chunk.usage.completion_tokens / 100)) if chunk.usage is not None else None), 
-                    eval_count= (chunk.usage.completion_tokens if chunk.usage is not None else None),
-                    prompt_eval_count=(chunk.usage.prompt_tokens if chunk.usage is not None else None),
-                    eval_duration=(int((time.perf_counter() - start_ts) * 1_000_000_000) if chunk.usage is not None else None),
-                    total_duration=(int((time.perf_counter() - start_ts) * 1_000_000_000) if chunk.usage is not None else None),
-                    message=assistant_msg)
+            thinking = getattr(with_thinking, "reasoning", None) if with_thinking else None
+            role = chunk.choices[0].message.role or "assistant"
+            content = chunk.choices[0].message.content or ''
+        assistant_msg = ollama.Message(
+            role=role,
+            content=content,
+            thinking=thinking,
+            images=None,
+            tool_name=None,
+            tool_calls=None)
+        rechunk = ollama.ChatResponse(
+            model=chunk.model, 
+            created_at=iso8601_ns(),
+            done=True if chunk.usage is not None else False,
+            done_reason=chunk.choices[0].finish_reason, #if chunk.choices[0].finish_reason is not None else None,
+            total_duration=int((time.perf_counter() - start_ts) * 1_000_000_000) if chunk.usage is not None else 0,
+            load_duration=100000, 
+            prompt_eval_count=int(chunk.usage.prompt_tokens) if chunk.usage is not None else 0,
+            prompt_eval_duration=int((time.perf_counter() - start_ts) * 1_000_000_000 * (chunk.usage.prompt_tokens / chunk.usage.completion_tokens / 100)) if chunk.usage is not None and chunk.usage.completion_tokens != 0 else 0, 
+            eval_count=int(chunk.usage.completion_tokens) if chunk.usage is not None else 0,
+            eval_duration=int((time.perf_counter() - start_ts) * 1_000_000_000) if chunk.usage is not None else 0,
+            message=assistant_msg)
         return rechunk
     
-    def openai_completion2ollama(chunk: dict, stream: bool, start_ts: float):
+    def openai_completion2ollama(chunk: dict, stream: bool, start_ts: float) -> ollama.GenerateResponse:
         with_thinking = chunk.choices[0] if chunk.choices[0] else None
         thinking = getattr(with_thinking, "reasoning", None) if with_thinking else None
-        rechunk = ollama.GenerateResponse(model=chunk.model,
-                                      created_at=iso8601_ns(),
-                                      load_duration=10000,
-                                      done_reason=chunk.choices[0].finish_reason,
-                                      done=None, #True if chunk.choices[0].finish_reason is not None else False,
-                                      total_duration=(int((time.perf_counter() - start_ts) * 1000) if chunk.usage is not None else None),
-                                      eval_duration=(int((time.perf_counter() - start_ts) * 1000) if chunk.usage is not None else None),
-                                      thinking=thinking,
-                                      response=chunk.choices[0].text
-                    )
+        rechunk = ollama.GenerateResponse(
+            model=chunk.model,
+            created_at=iso8601_ns(),
+            done=True if chunk.usage is not None else False,
+            done_reason=chunk.choices[0].finish_reason,
+            total_duration=int((time.perf_counter() - start_ts) * 1000) if chunk.usage is not None else 0,
+            load_duration=10000,
+            prompt_eval_count=int(chunk.usage.prompt_tokens) if chunk.usage is not None else 0,
+            prompt_eval_duration=int((time.perf_counter() - start_ts) * 1_000_000_000 * (chunk.usage.prompt_tokens / chunk.usage.completion_tokens / 100)) if chunk.usage is not None and chunk.usage.completion_tokens != 0 else 0,
+            eval_count=int(chunk.usage.completion_tokens) if chunk.usage is not None else 0,
+            eval_duration=int((time.perf_counter() - start_ts) * 1000) if chunk.usage is not None else 0,
+            response=chunk.choices[0].text or '',
+            thinking=thinking)
         return rechunk
     
-    def openai_embeddings2ollama(chunk: dict):
+    def openai_embeddings2ollama(chunk: dict) -> ollama.EmbeddingsResponse:
         rechunk = ollama.EmbeddingsResponse(embedding=chunk.data[0].embedding)
         return rechunk
 
-    def openai_embed2ollama(chunk: dict, model: str):
-        rechunk = ollama.EmbedResponse(model=model,
-                                    created_at=iso8601_ns(),
-                                    done=None,
-                                    done_reason=None,
-                                    total_duration=None,
-                                    load_duration=None,
-                                    prompt_eval_count=None,
-                                    prompt_eval_duration=None,
-                                    eval_count=None,
-                                    eval_duration=None,
-                                    embeddings=[chunk.data[0].embedding]
-                )
+    def openai_embed2ollama(chunk: dict, model: str) -> ollama.EmbedResponse:
+        rechunk = ollama.EmbedResponse(
+            model=model,
+            created_at=iso8601_ns(),
+            done=None,
+            done_reason=None,
+            total_duration=None,
+            load_duration=None,
+            prompt_eval_count=None,
+            prompt_eval_duration=None,
+            eval_count=None,
+            eval_duration=None,
+            embeddings=[chunk.data[0].embedding])
         return rechunk
+    
 # ------------------------------------------------------------------
 # SSE Helpser
 # ------------------------------------------------------------------
@@ -488,7 +506,7 @@ async def proxy(request: Request):
         images = payload.get("images")
         options = payload.get("options")
         keep_alive = payload.get("keep_alive")
-
+        
         if not model:
             raise HTTPException(
                 status_code=400, detail="Missing required field 'model'"
@@ -514,8 +532,15 @@ async def proxy(request: Request):
 
         optional_params = {
             "stream": stream,
-        }
-
+            "max_tokens": options.get("num_predict") if options and "num_predict" in options else None,
+            "frequency_penalty": options.get("frequency_penalty") if options and "frequency_penalty" in options else None,
+            "presence_penalty": options.get("presence_penalty") if options and "presence_penalty" in options else None,
+            "seed": options.get("seed") if options and "seed" in options else None,
+            "stop": options.get("stop") if options and "stop" in options else None,
+            "top_p": options.get("top_p") if options and "top_p" in options else None,
+            "temperature": options.get("temperature") if options and "temperature" in options else None,
+            "sufix": suffix,
+            }
         params.update({k: v for k, v in optional_params.items() if v is not None})
         oclient = openai.AsyncOpenAI(base_url=endpoint, default_headers=default_headers, api_key=config.api_keys[endpoint])
     else:
@@ -542,7 +567,7 @@ async def proxy(request: Request):
             else:
                 if is_openai_endpoint:
                     response = rechunk.openai_completion2ollama(async_gen, stream, start_ts)
-                    response = json.dumps(response)
+                    response = response.model_dump_json()
                 else:
                     response = async_gen.model_dump_json()
                 json_line = (
@@ -581,10 +606,9 @@ async def chat_proxy(request: Request):
         stream = payload.get("stream")
         think = payload.get("think")
         _format = payload.get("format")
-        options = payload.get("options")
         keep_alive = payload.get("keep_alive")
         options = payload.get("options")
-
+        
         if not model:
             raise HTTPException(
                 status_code=400, detail="Missing required field 'model'"
@@ -610,12 +634,20 @@ async def chat_proxy(request: Request):
         params = {
             "messages": messages, 
             "model": model,
-        }
-
+            }
         optional_params = {
             "tools": tools,
             "stream": stream,
-        }
+            "stream_options": {"include_usage": True} if stream is not None else None,
+            "max_tokens": options.get("num_predict") if options and "num_predict" in options else None,
+            "frequency_penalty": options.get("frequency_penalty") if options and "frequency_penalty" in options else None,
+            "presence_penalty": options.get("presence_penalty") if options and "presence_penalty" in options else None,
+            "seed": options.get("seed") if options and "seed" in options else None,
+            "stop": options.get("stop") if options and "stop" in options else None,
+            "top_p": options.get("top_p") if options and "top_p" in options else None,
+            "temperature": options.get("temperature") if options and "temperature" in options else None,
+            "response_format": {"type": "json_schema", "json_schema": _format} if _format is not None else None
+            }
         params.update({k: v for k, v in optional_params.items() if v is not None})
         oclient = openai.AsyncOpenAI(base_url=endpoint, default_headers=default_headers, api_key=config.api_keys[endpoint])
     else:
@@ -632,9 +664,11 @@ async def chat_proxy(request: Request):
                 async_gen = await client.chat(model=model, messages=messages, tools=tools, stream=stream, think=think, format=_format, options=options, keep_alive=keep_alive)
             if stream == True:
                 async for chunk in async_gen:
+                    print(chunk)
                     if is_openai_endpoint:
                         chunk = rechunk.openai_chat_completion2ollama(chunk, stream, start_ts)
                     # `chunk` can be a dict or a pydantic model – dump to JSON safely
+                    print(chunk)
                     if hasattr(chunk, "model_dump_json"):
                         json_line = chunk.model_dump_json()
                     else:
@@ -643,7 +677,7 @@ async def chat_proxy(request: Request):
             else:
                 if is_openai_endpoint:
                     response = rechunk.openai_chat_completion2ollama(async_gen, stream, start_ts)
-                    response = json.dumps(response)
+                    response = response.model_dump_json()
                 else:
                     response = async_gen.model_dump_json()
                 json_line = (
@@ -658,9 +692,10 @@ async def chat_proxy(request: Request):
             await decrement_usage(endpoint, model)
 
     # 4. Return a StreamingResponse backed by the generator
+    media_type = "application/x-ndjson" if stream else "application/json"
     return StreamingResponse(
         stream_chat_response(),
-        media_type="application/json",
+        media_type=media_type,
     )
 
 # -------------------------------------------------------------
@@ -1294,9 +1329,10 @@ async def openai_chat_completions_proxy(request: Request):
                         if hasattr(chunk, "model_dump_json")
                         else json.dumps(chunk)
                     )
-                    yield f"data: {data}\n\n".encode("utf-8")
+                    if chunk.choices[0].delta.content is not None:
+                        yield f"data: {data}\n\n".encode("utf-8")
                 # Final DONE event
-                yield b"data: [DONE]\n\n"
+                #yield b"data: [DONE]\n\n"
             else:
                 json_line = (
                     async_gen.model_dump_json()
