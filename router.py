@@ -284,9 +284,17 @@ def is_base64(image_string):
 
 def resize_image_if_needed(image_data):
     try:
+        # Check if already data-url
+        if image_data.startswith("data:"):
+            try:
+                header, image_data = image_data.split(",", 1)
+            except ValueError:
+                pass
         # Decode the base64 image data
         image_bytes = base64.b64decode(image_data)
         image = Image.open(io.BytesIO(image_bytes))
+        if image.mode not in ("RGB", "L"):
+            image = image.convert("RGB")
 
         # Get current size
         width, height = image.size
