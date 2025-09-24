@@ -2,11 +2,11 @@
 title: NOMYO Router - an Ollama Proxy with Endpoint:Model aware routing
 author: alpha-nerd-nomyo
 author_url: https://github.com/nomyo-ai
-version: 0.3
+version: 0.4
 license: AGPL
 """
 # -------------------------------------------------------------
-import json, time, asyncio, yaml, ollama, openai, os, re, aiohttp, ssl, datetime, random, base64
+import json, time, asyncio, yaml, ollama, openai, os, re, aiohttp, ssl, datetime, random, base64, io
 from pathlib import Path
 from typing import Dict, Set, List, Optional
 from fastapi import FastAPI, Request, HTTPException
@@ -17,6 +17,7 @@ from starlette.responses import StreamingResponse, JSONResponse, Response, HTMLR
 from pydantic import Field
 from pydantic_settings import BaseSettings
 from collections import defaultdict
+from PIL import Image
 
 # ------------------------------------------------------------------
 # In‑memory caches
@@ -281,6 +282,37 @@ def is_base64(image_string):
     except Exception as e:
         return False
 
+def resize_image_if_needed(image_data):
+    try:
+        # Decode the base64 image data
+        image_bytes = base64.b64decode(image_data)
+        image = Image.open(io.BytesIO(image_bytes))
+
+        # Get current size
+        width, height = image.size
+
+        # Calculate the new dimensions while maintaining aspect ratio
+        if width > 512 or height > 512:
+            aspect_ratio = width / height
+            if aspect_ratio > 1:  # Width is larger
+                new_width = 512
+                new_height = int(512 / aspect_ratio)
+            else:  # Height is larger
+                new_height = 512
+                new_width = int(512 * aspect_ratio)
+
+            image = image.resize((new_width, new_height), Image.LANCZOS)
+
+        # Encode the resized image back to base64
+        buffered = io.BytesIO()
+        image.save(buffered, format="PNG")
+        resized_image_data = base64.b64encode(buffered.getvalue()).decode("utf-8")
+        return resized_image_data
+
+    except Exception as e:
+        print(f"Error processing image: {e}")
+        return None
+
 def transform_images_to_data_urls(message_list):
     for message in message_list:
         if "images" in message:
@@ -291,17 +323,19 @@ def transform_images_to_data_urls(message_list):
             for image in images:            #TODO: quality downsize if images are too big to fit into model context window size
                 if not is_base64(image):
                     raise ValueError(f"Image string is not a valid base64 encoded string.")
-                data_url = f"data:image/jpeg;base64,{image}"
-                #new_content.append({
-                #    "type": "text",
-                #    "text": ""
-                #})
-                new_content.append({
-                    "type": "image_url",
-                    "image_url": {
-                        "url": data_url
-                    }
-                })
+                resized_image = resize_image_if_needed(image)
+                if resized_image:
+                    data_url = f"data:image/png;base64,{resized_image}"
+                    #new_content.append({
+                    #    "type": "text",
+                    #    "text": ""
+                    #})
+                    new_content.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": data_url
+                        }
+                    })
             message["content"] = new_content
 
     return message_list
