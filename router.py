@@ -590,7 +590,8 @@ async def proxy(request: Request):
                 status_code=400, detail="Missing required field 'prompt'"
             )
     except json.JSONDecodeError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}") from e
+        error_msg = f"Invalid JSON format in request body: {str(e)}. Please ensure the request is properly formatted."
+        raise HTTPException(status_code=400, detail=error_msg) from e
 
     
     endpoint = await choose_endpoint(model)
@@ -1652,7 +1653,7 @@ async def startup_event() -> None:
     
     ssl_context = ssl.create_default_context()
     connector = aiohttp.TCPConnector(limit=0, limit_per_host=512, ssl=ssl_context)
-    timeout = aiohttp.ClientTimeout(total=5, connect=5, sock_read=120, sock_connect=5)
+    timeout = aiohttp.ClientTimeout(total=60, connect=15, sock_read=120, sock_connect=15)
     session = aiohttp.ClientSession(connector=connector, timeout=timeout)
 
     app_state["connector"] = connector
