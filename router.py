@@ -102,9 +102,9 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 default_headers={
-            "HTTP-Referer": "https://nomyo.ai",
-            "X-Title": "NOMYO Router",
-            }
+    "HTTP-Referer": "https://nomyo.ai",
+    "X-Title": "NOMYO Router",
+    }
         
 # -------------------------------------------------------------
 # 3. Global state: per‑endpoint per‑model active connection counters
@@ -115,8 +115,6 @@ usage_lock = asyncio.Lock()  # protects access to usage_counts
 # -------------------------------------------------------------
 # 4. Helperfunctions 
 # -------------------------------------------------------------
-aiotimeout = aiohttp.ClientTimeout(total=5)
-
 def _is_fresh(cached_at: float, ttl: int) -> bool:
     return (time.time() - cached_at) < ttl
 
@@ -309,7 +307,7 @@ def resize_image_if_needed(image_data):
                 new_height = 512
                 new_width = int(512 * aspect_ratio)
 
-            image = image.resize((new_width, new_height), Image.LANCZOS)
+            image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
         # Encode the resized image back to base64
         buffered = io.BytesIO()
@@ -402,12 +400,12 @@ class rechunk:
             created_at=iso8601_ns(),
             done=True if chunk.usage is not None else False,
             done_reason=chunk.choices[0].finish_reason,
-            total_duration=int((time.perf_counter() - start_ts) * 1000) if chunk.usage is not None else 0,
+            total_duration=int((time.perf_counter() - start_ts) * 1_000_000_000) if chunk.usage is not None else 0,
             load_duration=10000,
             prompt_eval_count=int(chunk.usage.prompt_tokens) if chunk.usage is not None else 0,
             prompt_eval_duration=int((time.perf_counter() - start_ts) * 1_000_000_000 * (chunk.usage.prompt_tokens / chunk.usage.completion_tokens / 100)) if chunk.usage is not None and chunk.usage.completion_tokens != 0 else 0,
             eval_count=int(chunk.usage.completion_tokens) if chunk.usage is not None else 0,
-            eval_duration=int((time.perf_counter() - start_ts) * 1000) if chunk.usage is not None else 0,
+            eval_duration=int((time.perf_counter() - start_ts) * 1_000_000_000) if chunk.usage is not None else 0,
             response=chunk.choices[0].text or '',
             thinking=thinking)
         return rechunk
@@ -614,7 +612,7 @@ async def proxy(request: Request):
             "stop": options.get("stop") if options and "stop" in options else None,
             "top_p": options.get("top_p") if options and "top_p" in options else None,
             "temperature": options.get("temperature") if options and "temperature" in options else None,
-            "sufix": suffix,
+            "suffix": suffix,
             }
         params.update({k: v for k, v in optional_params.items() if v is not None})
         oclient = openai.AsyncOpenAI(base_url=endpoint, default_headers=default_headers, api_key=config.api_keys[endpoint])
@@ -1063,7 +1061,7 @@ async def delete_proxy(request: Request, model: Optional[str] = None):
             copy = await client.delete(model=model)
             status_list.append(copy.status)
     
-    # 4. Retrun 200 0K, if a single enpoint fails, respond with 404
+    # 4. Return 200 0K, if a single enpoint fails, respond with 404
     return Response(status_code=404 if 404 in status_list else 200)   
 
 # -------------------------------------------------------------
