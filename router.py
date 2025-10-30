@@ -277,15 +277,14 @@ async def decrement_usage(endpoint: str, model: str) -> None:
     await publish_snapshot()
 
 def iso8601_ns():
-    ns_since_epoch = time.time_ns()
-    dt = datetime.datetime.fromtimestamp(
-        ns_since_epoch / 1_000_000_000,  # seconds
-        tz=datetime.timezone.utc
+    ns = time.time_ns()
+    sec, ns_rem = divmod(ns, 1_000_000_000)
+    dt = datetime.datetime.fromtimestamp(sec, tz=datetime.timezone.utc)
+    return (
+        f"{dt.year:04d}-{dt.month:02d}-{dt.day:02d}T"
+        f"{dt.hour:02d}:{dt.minute:02d}:{dt.second:02d}."
+        f"{ns_rem:09d}Z"
     )
-    iso8601_with_ns = (
-        dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{ns_since_epoch % 1_000_000_000:09d}Z"
-    )
-    return iso8601_with_ns
 
 def is_base64(image_string):
     try:
