@@ -122,6 +122,20 @@ async def _ensure_success(resp: aiohttp.ClientResponse) -> None:
     if resp.status >= 400:
         text = await resp.text()
         raise HTTPException(status_code=resp.status, detail=text)
+    
+def is_ext_openai_endpoint(endpoint: str) -> bool:
+    if "/v1" not in endpoint:
+        return False
+    
+    base_endpoint = endpoint.replace('/v1', '')
+    if base_endpoint in config.endpoints:
+        return False  # It's Ollama's /v1
+    
+    # Check for default Ollama port
+    if ':11434' in endpoint:
+        return False  # It's Ollama
+    
+    return True  # It's an external OpenAI endpoint
 
 class fetch:
     async def available_models(endpoint: str, api_key: Optional[str] = None) -> Set[str]:
@@ -508,8 +522,13 @@ async def choose_endpoint(model: str) -> str:
     # 6️⃣ 
     if not candidate_endpoints:
         if ":latest" in model:  #ollama naming convention not applicable to openai
-            model = model.split(":latest")
-            model = model[0]
+            model_without_latest = model.split(":latest")[0]
+            candidate_endpoints = [
+                ep for ep, models in zip(config.endpoints, advertised_sets)
+                if model_without_latest in models and is_ext_openai_endpoint(ep)
+            ]
+        if not candidate_endpoints:
+            model = model + ":latest"
             candidate_endpoints = [
                 ep for ep, models in zip(config.endpoints, advertised_sets)
                 if model in models
