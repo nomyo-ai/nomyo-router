@@ -424,76 +424,6 @@
                             });
                         });
 
-                    /* show logic */
-                    document.body.addEventListener("click", async (e) => {
-                        if (!e.target.matches(".show-link")) return;
-                        e.preventDefault();
-                        const model = e.target.dataset.model;
-                        try {
-                            const resp = await fetch(
-                                `/api/show?model=${encodeURIComponent(model)}`,
-                                { method: "POST" },
-                            );
-                            if (!resp.ok)
-                                throw new Error(`Status ${resp.status}`);
-                            const data = await resp.json();
-                            document.getElementById("json-output").textContent =
-                                JSON.stringify(data, null, 2).replace(
-                                    /\\n/g,
-                                    "\n",
-                                );
-                            document.getElementById(
-                                "show-modal",
-                            ).style.display = "flex";
-                        } catch (err) {
-                            console.error(err);
-                            alert(
-                                `Could not load model details: ${err.message}`,
-                            );
-                        }
-                    });
-
-                    /* pull logic */
-                    document
-                        .getElementById("pull-btn")
-                        .addEventListener("click", async () => {
-                            const model = document
-                                .getElementById("pull-model-input")
-                                .value.trim();
-                            const statusEl =
-                                document.getElementById("pull-status");
-                            if (!model) {
-                                alert("Please enter a model name.");
-                                return;
-                            }
-                            try {
-                                const resp = await fetch(
-                                    `/api/pull?model=${encodeURIComponent(model)}`,
-                                    { method: "POST" },
-                                );
-                                if (!resp.ok)
-                                    throw new Error(`Status ${resp.status}`);
-                                const data = await resp.json();
-                                statusEl.textContent = `✅ ${data.status}`;
-                                statusEl.style.color = "green";
-                                loadTags();
-                            } catch (err) {
-                                console.error(err);
-                                statusEl.textContent = `❌ ${err.message}`;
-                                statusEl.style.color = "red";
-                            }
-                        });
-
-                    /* modal close */
-                    const modal = document.getElementById("show-modal");
-                    modal.addEventListener("click", (e) => {
-                        if (
-                            e.target === modal ||
-                            e.target.matches(".close-btn")
-                        ) {
-                            modal.style.display = "none";
-                        }
-                    });
                 } catch (e) {
                     console.error(e);
                 }
@@ -592,6 +522,77 @@
                 loadUsage();
                 setInterval(loadPS, 60_000);
                 setInterval(loadEndpoints, 300_000);
+                
+                /* show logic */
+                document.body.addEventListener("click", async (e) => {
+                    if (!e.target.matches(".show-link")) return;
+                    e.preventDefault();
+                    const model = e.target.dataset.model;
+                    try {
+                        const resp = await fetch(
+                            `/api/show?model=${encodeURIComponent(model)}`,
+                            { method: "POST" },
+                        );
+                        if (!resp.ok)
+                            throw new Error(`Status ${resp.status}`);
+                        const data = await resp.json();
+                        document.getElementById("json-output").textContent =
+                            JSON.stringify(data, null, 2).replace(
+                                /\\n/g,
+                                "\n",
+                            );
+                        document.getElementById(
+                            "show-modal",
+                        ).style.display = "flex";
+                    } catch (err) {
+                        console.error(err);
+                        alert(
+                            `Could not load model details: ${err.message}`,
+                        );
+                    }
+                });
+
+                /* pull logic */
+                document
+                    .getElementById("pull-btn")
+                    .addEventListener("click", async () => {
+                        const model = document
+                            .getElementById("pull-model-input")
+                            .value.trim();
+                        const statusEl =
+                            document.getElementById("pull-status");
+                        if (!model) {
+                            alert("Please enter a model name.");
+                            return;
+                        }
+                        try {
+                            const resp = await fetch(
+                                `/api/pull?model=${encodeURIComponent(model)}`,
+                                { method: "POST" },
+                            );
+                            if (!resp.ok)
+                                throw new Error(`Status ${resp.status}`);
+                            const data = await resp.json();
+                            statusEl.textContent = `✅ ${data.status}`;
+                            statusEl.style.color = "green";
+                            loadTags();
+                        } catch (err) {
+                            console.error(err);
+                            statusEl.textContent = `❌ ${err.message}`;
+                            statusEl.style.color = "red";
+                        }
+                    });
+
+                /* modal close */
+                const modal = document.getElementById("show-modal");
+                modal.addEventListener("click", (e) => {
+                    if (
+                        e.target === modal ||
+                        e.target.matches(".close-btn")
+                    ) {
+                        modal.style.display = "none";
+                    }
+                });
             });
         </script>
 
