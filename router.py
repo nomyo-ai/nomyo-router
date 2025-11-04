@@ -110,6 +110,7 @@ default_headers={
 # 3. Global state: per‑endpoint per‑model active connection counters
 # -------------------------------------------------------------
 usage_counts: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+token_usage_counts: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
 usage_lock = asyncio.Lock()  # protects access to usage_counts
 
 # -------------------------------------------------------------
@@ -136,6 +137,13 @@ def is_ext_openai_endpoint(endpoint: str) -> bool:
         return False  # It's Ollama
     
     return True  # It's an external OpenAI endpoint
+
+def record_token_usage(endpoint: str, model: str, prompt: int = 0, completion: int = 0) -> None:
+    async def _record():
+        async with usage_lock:   # reuse the same lock that protects usage_counts
+            token_usage_counts[endpoint][model] += (prompt + completion)
+        await publish_snapshot()   # immediately broadcast the new totals
+    asyncio.create_task(_record())
 
 class fetch:
     async def available_models(endpoint: str, api_key: Optional[str] = None) -> Set[str]:
@@ -447,7 +455,9 @@ class rechunk:
 # ------------------------------------------------------------------
 async def publish_snapshot():
     async with usage_lock:
-        snapshot = json.dumps({"usage_counts": usage_counts}, sort_keys=True)
+        snapshot = json.dumps({"usage_counts": usage_counts,
+                                    "token_usage_counts": token_usage_counts,
+                                }, sort_keys=True)
     async with _subscribers_lock:
         for q in _subscribers:
             # If the queue is full, drop the message to avoid back‑pressure.
@@ -650,6 +660,9 @@ async def proxy(request: Request):
                 async for chunk in async_gen:
                     if is_openai_endpoint:
                         chunk = rechunk.openai_completion2ollama(chunk, stream, start_ts)
+                    prompt_tok = chunk.prompt_eval_count or 0
+                    comp_tok   = chunk.eval_count or 0
+                    record_token_usage(endpoint, model, prompt_tok, comp_tok)
                     if hasattr(chunk, "model_dump_json"):
                         json_line = chunk.model_dump_json()
                     else:
@@ -661,6 +674,9 @@ async def proxy(request: Request):
                     response = response.model_dump_json()
                 else:
                     response = async_gen.model_dump_json()
+                    prompt_tok = async_gen.prompt_eval_count or 0
+                    comp_tok   = async_gen.eval_count or 0
+                    record_token_usage(endpoint, model, prompt_tok, comp_tok)
                 json_line = (
                     response
                     if hasattr(async_gen, "model_dump_json")
@@ -731,7 +747,7 @@ async def chat_proxy(request: Request):
         optional_params = {
             "tools": tools,
             "stream": stream,
-            "stream_options": {"include_usage": True} if stream is not None else None,
+            "stream_options": {"include_usage": True} if stream else None,
             "max_tokens": options.get("num_predict") if options and "num_predict" in options else None,
             "frequency_penalty": options.get("frequency_penalty") if options and "frequency_penalty" in options else None,
             "presence_penalty": options.get("presence_penalty") if options and "presence_penalty" in options else None,
@@ -760,6 +776,9 @@ async def chat_proxy(request: Request):
                     if is_openai_endpoint:
                         chunk = rechunk.openai_chat_completion2ollama(chunk, stream, start_ts)
                     # `chunk` can be a dict or a pydantic model – dump to JSON safely
+                    prompt_tok = chunk.prompt_eval_count or 0
+                    comp_tok   = chunk.eval_count or 0
+                    record_token_usage(endpoint, model, prompt_tok, comp_tok)
                     if hasattr(chunk, "model_dump_json"):
                         json_line = chunk.model_dump_json()
                     else:
@@ -771,6 +790,9 @@ async def chat_proxy(request: Request):
                     response = response.model_dump_json()
                 else:
                     response = async_gen.model_dump_json()
+                    prompt_tok = async_gen.prompt_eval_count or 0
+                    comp_tok   = async_gen.eval_count or 0
+                    record_token_usage(endpoint, model, prompt_tok, comp_tok)
                 json_line = (
                     response
                     if hasattr(async_gen, "model_dump_json")
@@ -1255,7 +1277,8 @@ async def usage_proxy(request: Request):
     Return a snapshot of the usage counter for each endpoint.
     Useful for debugging / monitoring.
     """
-    return {"usage_counts": usage_counts}
+    return {"usage_counts": usage_counts,
+            "token_usage_counts": token_usage_counts}
 
 # -------------------------------------------------------------
 # 20. Proxy config route – for monitoring and frontent usage
