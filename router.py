@@ -1446,6 +1446,9 @@ async def openai_chat_completions_proxy(request: Request):
                         yield f"data: {data}\n\n".encode("utf-8")
                 yield b"data: [DONE]\n\n"
             else:
+                prompt_tok = async_gen.usage.prompt_tokens or 0
+                comp_tok   = async_gen.usage.completion_tokens or 0
+                record_token_usage(endpoint, payload.get("model"), prompt_tok, comp_tok)
                 json_line = (
                     async_gen.model_dump_json()
                     if hasattr(async_gen, "model_dump_json")
@@ -1549,6 +1552,9 @@ async def openai_completions_proxy(request: Request):
                 # Final DONE event
                 yield b"data: [DONE]\n\n"
             else:
+                prompt_tok = async_gen.usage.prompt_tokens or 0
+                comp_tok   = async_gen.usage.completion_tokens or 0
+                record_token_usage(endpoint, payload.get("model"), prompt_tok, comp_tok)
                 json_line = (
                     async_gen.model_dump_json()
                     if hasattr(async_gen, "model_dump_json")
