@@ -53,6 +53,30 @@ finally you can
 uvicorn router:app --host 127.0.0.1 --port 12434
 ```
 
+## Docker Deployment
+
+Build the container image locally:
+
+```sh
+docker build -t nomyo-router .
+```
+
+Run the router in Docker with your own configuration file mounted from the host. The entrypoint script accepts a `--config-path` argument so you can point to a file anywhere inside the container:
+
+```sh
+docker run -d \
+  --name nomyo-router \
+  -p 12434:12434 \
+  -v /absolute/path/to/config_folder:/app/config/ \
+  -e CONFIG_PATH /app/config/config.yaml
+  nomyo-router \
+```
+
+Notes:
+- `-e CONFIG_PATH` sets the `NOMYO_ROUTER_CONFIG_PATH` environment variable under the hood; you can export it directly instead if you prefer.
+- To override the bind address or port, export `UVICORN_HOST` or `UVICORN_PORT`, or pass the corresponding uvicorn flags after `--`, e.g. `nomyo-router --config-path /config/config.yaml -- --port 9000`.
+- Use `docker logs nomyo-router` to confirm the loaded endpoints and concurrency settings at startup.
+
 # Routing
 
 NOMYO Router accepts any Ollama request on the configured port for any Ollama endpoint from your frontend application. It then checks the available backends for the specific request.
