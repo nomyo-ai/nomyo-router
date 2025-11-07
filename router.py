@@ -9,6 +9,7 @@ license: AGPL
 import json, time, asyncio, yaml, ollama, openai, os, re, aiohttp, ssl, datetime, random, base64, io
 from pathlib import Path
 from typing import Dict, Set, List, Optional
+from urllib.parse import urlparse
 from fastapi import FastAPI, Request, HTTPException
 from fastapi_sse import sse_handler
 from fastapi.staticfiles import StaticFiles
@@ -86,8 +87,20 @@ class Config(BaseSettings):
             return cls(**cleaned)
         return cls()
 
+def _config_path_from_env() -> Path:
+    """
+    Resolve the configuration file path. Defaults to `config.yaml`
+    in the current working directory unless NOMYO_ROUTER_CONFIG_PATH
+    is set.
+    """
+    candidate = os.getenv("NOMYO_ROUTER_CONFIG_PATH")
+    if candidate:
+        return Path(candidate).expanduser()
+    return Path("config.yaml")
+
+
 # Create the global config object – it will be overwritten on startup
-config = Config()
+config = Config.from_yaml(_config_path_from_env())
 
 # -------------------------------------------------------------
 # 2. FastAPI application
@@ -122,6 +135,47 @@ async def _ensure_success(resp: aiohttp.ClientResponse) -> None:
     if resp.status >= 400:
         text = await resp.text()
         raise HTTPException(status_code=resp.status, detail=text)
+    
+def _format_connection_issue(url: str, error: Exception) -> str:
+    """
+    Provide a human-friendly error string for connection failures so operators
+    know which endpoint and address failed from inside the container.
+    """
+    parsed = urlparse(url)
+    host_hint = parsed.hostname or ""
+    port_hint = parsed.port or ""
+
+    if isinstance(error, aiohttp.ClientConnectorError):
+        resolved_host = getattr(error, "host", host_hint) or host_hint or "?"
+        resolved_port = getattr(error, "port", port_hint) or port_hint or "?"
+        parts = [
+            f"Failed to connect to {url} (resolved: {resolved_host}:{resolved_port}).",
+            "Ensure the endpoint address is reachable from within the container.",
+        ]
+        if resolved_host in {"localhost", "127.0.0.1"}:
+            parts.append(
+                "Inside Docker, 'localhost' refers to the container itself; use "
+                "'host.docker.internal' or a Docker network alias if the service "
+                "runs on the host machine."
+            )
+        os_error = getattr(error, "os_error", None)
+        if isinstance(os_error, OSError):
+            errno = getattr(os_error, "errno", None)
+            strerror = os_error.strerror or str(os_error)
+            if errno is not None or strerror:
+                parts.append(f"OS error [{errno}]: {strerror}.")
+        elif os_error:
+            parts.append(f"OS error: {os_error}.")
+        parts.append(f"Original error: {error}.")
+        return " ".join(parts)
+
+    if isinstance(error, asyncio.TimeoutError):
+        return (
+            f"Timed out waiting for {url}. "
+            "The remote endpoint may be offline or slow to respond."
+        )
+
+    return f"Error while contacting {url}: {error}"
     
 def is_ext_openai_endpoint(endpoint: str) -> bool:
     if "/v1" not in endpoint:
@@ -192,7 +246,8 @@ class fetch:
                     return models
         except Exception as e:
             # Treat any error as if the endpoint offers no models
-            print(f"[fetch.available_models] {endpoint} error: {e}")
+            message = _format_connection_issue(endpoint_url, e)
+            print(f"[fetch.available_models] {message}")
             _error_cache[endpoint] = time.time()
             return set()
 
@@ -212,8 +267,10 @@ class fetch:
             #   {"models": [{"name": "model1"}, {"name": "model2"}]}
             models = {m.get("name") for m in data.get("models", []) if m.get("name")}
             return models
-        except Exception:
+        except Exception as e:
             # If anything goes wrong we simply assume the endpoint has no models
+            message = _format_connection_issue(f"{endpoint}/api/ps", e)
+            print(f"[fetch.loaded_models] {message}")
             return set()
 
     async def endpoint_details(endpoint: str, route: str, detail: str, api_key: Optional[str] = None) -> List[dict]:
@@ -226,15 +283,17 @@ class fetch:
         if api_key is not None:
             headers = {"Authorization": "Bearer " + api_key}
         
+        request_url = f"{endpoint}{route}"
         try:
-            async with client.get(f"{endpoint}{route}", headers=headers) as resp:
+            async with client.get(request_url, headers=headers) as resp:
                 await _ensure_success(resp)
                 data = await resp.json()
             detail = data.get(detail, [])
             return detail
         except Exception as e:
             # If anything goes wrong we cannot reply details
-            print(e)
+            message = _format_connection_issue(request_url, e)
+            print(f"[fetch.endpoint_details] {message}")
             return []
 
 def ep2base(ep):
@@ -1269,23 +1328,25 @@ async def config_proxy(request: Request):
     which endpoints are being proxied.
     """
     async def check_endpoint(url: str):
+        client: aiohttp.ClientSession = app_state["session"]
+        headers = None
+        if "/v1" in url:
+            headers = {"Authorization": "Bearer " + config.api_keys[url]}
+            target_url = f"{url}/models"
+        else:
+            target_url = f"{url}/api/version"
+
         try:
-            client: aiohttp.ClientSession = app_state["session"]
-            if "/v1" in url:
-                headers = {"Authorization": "Bearer " + config.api_keys[url]}
-                async with client.get(f"{url}/models", headers=headers) as resp:
-                    await _ensure_success(resp)
-                    data = await resp.json()
-            else:
-                async with client.get(f"{url}/api/version") as resp:
-                    await _ensure_success(resp)
-                    data = await resp.json()
+            async with client.get(target_url, headers=headers) as resp:
+                await _ensure_success(resp)
+                data = await resp.json()
             if "/v1" in url:
                 return {"url": url, "status": "ok", "version": "latest"}
             else:
                 return {"url": url, "status": "ok", "version": data.get("version")}
         except Exception as e:
-            return {"url": url, "status": "error", "detail": str(e)}
+            detail = _format_connection_issue(target_url, e)
+            return {"url": url, "status": "error", "detail": detail}
 
     results = await asyncio.gather(*[check_endpoint(ep) for ep in config.endpoints])
     return {"endpoints": results}
@@ -1664,9 +1725,19 @@ async def usage_stream(request: Request):
 async def startup_event() -> None:
     global config
     # Load YAML config (or use defaults if not present)
-    config = Config.from_yaml(Path("config.yaml"))
-    print(f"Loaded configuration:\n endpoints={config.endpoints},\n "
-          f"max_concurrent_connections={config.max_concurrent_connections}")
+    config_path = _config_path_from_env()
+    config = Config.from_yaml(config_path)
+    if config_path.exists():
+        print(
+            f"Loaded configuration from {config_path}:\n"
+            f" endpoints={config.endpoints},\n"
+            f" max_concurrent_connections={config.max_concurrent_connections}"
+        )
+    else:
+        print(
+            f"No configuration file found at {config_path}. "
+            "Falling back to default settings."
+        )
     
     ssl_context = ssl.create_default_context()
     connector = aiohttp.TCPConnector(limit=0, limit_per_host=512, ssl=ssl_context)
