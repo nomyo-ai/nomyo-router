@@ -41,7 +41,7 @@ source .venv/router/bin/activate
 pip3 install -r requirements.txt
 ```
 
-on the shell do:
+[optional] on the shell do:
 
 ```
 export OPENAI_KEY=YOUR_SECRET_API_KEY

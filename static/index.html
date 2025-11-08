@@ -267,11 +267,12 @@
                             <th>Quant</th>
                             <th>Ctx</th>
                             <th>Digest</th>
+                            <th>Token</th> 
                         </tr>
                     </thead>
                     <tbody id="ps-body">
                         <tr>
-                            <td colspan="5" class="loading">Loading…</td>
+                            <td colspan="6" class="loading">Loading…</td>
                         </tr>
                     </tbody>
                 </table>
@@ -299,6 +300,7 @@
         </div>
 
         <script>
+            let psRows = new Map(); 
             /* ---------- Utility ---------- */
             async function fetchJSON(url) {
                 const resp = await fetch(url);
@@ -435,11 +437,28 @@
                     const data = await fetchJSON("/api/ps");
                     const body = document.getElementById("ps-body");
                     body.innerHTML = data.models
-                        .map(
-                            (m) =>
-                                `<tr><td class="model">${m.name}</td><td>${m.details.parameter_size}</td><td>${m.details.quantization_level}</td><td>${m.context_length}</td><td>${m.digest}</td></tr>`,
-                        )
+                        .map(m => {
+                            const existingRow = psRows.get(m.name);
+                            const tokenValue = existingRow
+                                ? existingRow.querySelector(".token-usage")?.textContent ?? 0
+                                : 0;
+                            return `<tr data-model="${m.name}">
+                                <td class="model">${m.name}</td>
+                                <td>${m.details.parameter_size}</td>
+                                <td>${m.details.quantization_level}</td>
+                                <td>${m.context_length}</td>
+                                <td>${m.digest}</td>
+                                <td class="token-usage">${tokenValue}</td>
+                            </tr>`;
+                        })
                         .join("");
+                        psRows.clear();
+                        document
+                        .querySelectorAll("#ps-body tr[data-model]")
+                        .forEach((row) => {
+                            const model = row.dataset.model;
+                            if (model) psRows.set(model, row);
+                        });
                 } catch (e) {
                     console.error(e);
                 }
@@ -502,6 +521,26 @@
                     try {
                         const payload = JSON.parse(e.data); // SSE sends plain text
                         renderChart(payload);
+                        const usage   = payload.usage_counts || {};
+                        const tokens  = payload.token_usage_counts || {};
+
+                        psRows.forEach((row, model) => {
+                            /* regular usage count – optional if you want to keep it */
+                            let total = 0;
+                            for (const ep in usage) {
+                            total += usage[ep][model] || 0;
+                            }
+                            const usageCell = row.querySelector(".usage");
+                            if (usageCell) usageCell.textContent = total;
+
+                            /* token usage */
+                            let tokenTotal = 0;
+                            for (const ep in tokens) {
+                            tokenTotal += tokens[ep][model] || 0;
+                            }
+                            const tokenCell = row.querySelector(".token-usage");
+                            if (tokenCell) tokenCell.textContent = tokenTotal;
+                        });
                     } catch (err) {
                         console.error("Failed to parse SSE payload", err);
                     }
