@@ -1396,9 +1396,6 @@ async def openai_embedding_proxy(request: Request):
 
         model = payload.get("model")
         doc = payload.get("input")
-        
-        if ":latest" in model:
-            model = model[:-7]
 
         if not model:
             raise HTTPException(
@@ -1414,7 +1411,7 @@ async def openai_embedding_proxy(request: Request):
     # 2. Endpoint logic
     endpoint = await choose_endpoint(model)
     await increment_usage(endpoint, model)
-    if "/v1" in endpoint:
+    if "/v1" in endpoint and is_ext_openai_endpoint(endpoint):
         api_key = config.api_keys[endpoint]
     else:
         api_key = "ollama"
