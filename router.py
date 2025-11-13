@@ -1397,6 +1397,8 @@ async def openai_embedding_proxy(request: Request):
         model = payload.get("model")
         doc = payload.get("input")
         
+        if ":latest" in model:
+            model = model[:-7]
 
         if not model:
             raise HTTPException(
