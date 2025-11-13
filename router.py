@@ -1700,7 +1700,7 @@ async def health_proxy(request: Request):
     * The HTTP status code is 200 when everything is healthy, 503 otherwise.
     """
     # Run all health checks in parallel
-    tasks = [fetch.endpoint_details(ep, "/api/version", "version") for ep in config.endpoints]
+    tasks = [fetch.endpoint_details(ep, "/api/version", "version") for ep in config.endpoints if not is_ext_openai_endpoint(ep)]
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
