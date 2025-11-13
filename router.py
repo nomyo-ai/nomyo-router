@@ -37,12 +37,13 @@ _subscribers_lock = asyncio.Lock()
 token_queue: asyncio.Queue[tuple[str, str, int, int]] = asyncio.Queue()
 
 # ------------------------------------------------------------------
-# aiohttp Global Sessions
+# Globals
 # ------------------------------------------------------------------
 app_state = {
     "session": None,
     "connector": None,
 }
+token_worker_task: asyncio.Task | None = None
 
 # -------------------------------------------------------------
 # 1. Configuration loader
@@ -1780,9 +1781,10 @@ async def startup_event() -> None:
 
     app_state["connector"] = connector
     app_state["session"] = session
-    asyncio.create_task(token_worker())
+    token_worker_task = asyncio.create_task(token_worker())
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
     await close_all_sse_queues()
     await app_state["session"].close()
+    token_worker_task.cancel()
