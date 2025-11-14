@@ -1411,7 +1411,7 @@ async def openai_embedding_proxy(request: Request):
     # 2. Endpoint logic
     endpoint = await choose_endpoint(model)
     await increment_usage(endpoint, model)
-    if "/v1" in endpoint and is_ext_openai_endpoint(endpoint):
+    if "/v1" in endpoint: # and is_ext_openai_endpoint(endpoint):
         api_key = config.api_keys[endpoint]
     else:
         api_key = "ollama"
@@ -1700,7 +1700,7 @@ async def health_proxy(request: Request):
     * The HTTP status code is 200 when everything is healthy, 503 otherwise.
     """
     # Run all health checks in parallel
-    tasks = [fetch.endpoint_details(ep, "/api/version", "version") for ep in config.endpoints if not is_ext_openai_endpoint(ep)]
+    tasks = [fetch.endpoint_details(ep, "/api/version", "version") for ep in config.endpoints] # if not is_ext_openai_endpoint(ep)]
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -1786,4 +1786,5 @@ async def startup_event() -> None:
 async def shutdown_event() -> None:
     await close_all_sse_queues()
     await app_state["session"].close()
-    token_worker_task.cancel()
+    if token_worker_task is not None:
+        token_worker_task.cancel()
