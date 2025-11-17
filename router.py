@@ -25,6 +25,7 @@ from PIL import Image
 # ------------------------------------------------------------------
 # Successful results are cached for 300s
 _models_cache: dict[str, tuple[Set[str], float]] = {}
+_loaded_models_cache: dict[str, tuple[Set[str], float]] = {}
 # Transient errors are cached for 1s – the key stays until the
 # timeout expires, after which the endpoint will be queried again.
 _error_cache: dict[str, float] = {}
@@ -226,7 +227,7 @@ class fetch:
                 del _models_cache[endpoint]
 
         if endpoint in _error_cache:
-            if _is_fresh(_error_cache[endpoint], 1):
+            if _is_fresh(_error_cache[endpoint], 10):
                 # Still within the short error TTL – pretend nothing is available
                 return set()
             else:
@@ -269,9 +270,22 @@ class fetch:
         loaded on that endpoint. If the request fails (e.g. timeout, 5xx), an empty
         set is returned.
         """
-        client: aiohttp.ClientSession = app_state["session"]
         if is_ext_openai_endpoint(endpoint):
             return set()
+        if endpoint in _loaded_models_cache:
+            models, cached_at = _loaded_models_cache[endpoint]
+            if _is_fresh(cached_at, 30):
+                return models
+            else:
+                # stale entry – drop it
+                del _loaded_models_cache[endpoint]
+
+        if endpoint in _error_cache:
+            if _is_fresh(_error_cache[endpoint], 10):
+                return set()
+            else:
+                del _error_cache[endpoint]
+        client: aiohttp.ClientSession = app_state["session"]
         try:
             async with client.get(f"{endpoint}/api/ps") as resp:
                 await _ensure_success(resp)
@@ -279,6 +293,7 @@ class fetch:
             # The response format is:
             #   {"models": [{"name": "model1"}, {"name": "model2"}]}
             models = {m.get("name") for m in data.get("models", []) if m.get("name")}
+            _loaded_models_cache[endpoint] = (models, time.time())
             return models
         except Exception as e:
             # If anything goes wrong we simply assume the endpoint has no models
@@ -975,7 +990,7 @@ async def embed_proxy(request: Request):
 
     # 2. Endpoint logic
     endpoint = await choose_endpoint(model)
-    is_openai_endpoint = "/v1" in endpoint
+    is_openai_endpoint = is_ext_openai_endpoint(endpoint) #"/v1" in endpoint
     if is_openai_endpoint:
         if ":latest" in model:
             model = model.split(":latest")
