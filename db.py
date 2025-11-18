@@ -132,3 +132,17 @@ class TokenDatabase:
                         'total_tokens': row[4],
                         'timestamp': row[5]
                     }
+
+    async def get_token_counts_for_model(self, model):
+        """Get token counts for a specific model."""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute('SELECT endpoint, model, input_tokens, output_tokens, total_tokens FROM token_counts WHERE model = ?', (model,)) as cursor:
+                async for row in cursor:
+                    return {
+                        'endpoint': row[0],
+                        'model': row[1],
+                        'input_tokens': row[2],
+                        'output_tokens': row[3],
+                        'total_tokens': row[4]
+                    }
+            return None

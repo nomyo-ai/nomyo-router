@@ -447,7 +447,7 @@
                                 ? `${digest.slice(0, 12)}...${digest.slice(-12)}`
                                 : digest;
                             return `<tr data-model="${m.name}">
-                                <td class="model">${m.name}</td>
+                                <td class="model">${m.name} <a href="#" class="stats-link" data-model="${m.name}">stats</a></td>
                                 <td>${m.details.parameter_size}</td>
                                 <td>${m.details.quantization_level}</td>
                                 <td>${m.context_length}</td>
@@ -636,6 +636,56 @@
                         modal.style.display = "none";
                     }
                 });
+
+                /* stats logic */
+                document.body.addEventListener("click", async (e) => {
+                    if (!e.target.matches(".stats-link")) return;
+                    e.preventDefault();
+                    const model = e.target.dataset.model;
+                    try {
+                        const resp = await fetch(
+                            `/api/stats?model=${encodeURIComponent(model)}`,
+                            { method: "POST" },
+                        );
+                        if (!resp.ok)
+                            throw new Error(`Status ${resp.status}`);
+                        const data = await resp.json();
+                        const content = document.getElementById("stats-content");
+                        content.innerHTML = `
+                            <h3>Token Usage</h3>
+                            <p>Input tokens: ${data.input_tokens}</p>
+                            <p>Output tokens: ${data.output_tokens}</p>
+                            <p>Total tokens: ${data.total_tokens}</p>
+                            <h3>Usage Over Time</h3>
+                            <div id="time-series-chart">
+                                ${data.time_series.length > 0 ?
+                                    data.time_series.map(ts => `
+                                        <div>
+                                            <strong>${new Date(ts.timestamp * 1000).toLocaleString()}</strong>
+                                            <p>Input: ${ts.input_tokens}, Output: ${ts.output_tokens}, Total: ${ts.total_tokens}</p>
+                                        </div>
+                                    `).join('') :
+                                    '<p>No time series data available</p>'
+                                }
+                            </div>
+                        `;
+                        document.getElementById("stats-modal").style.display = "flex";
+                    } catch (err) {
+                        console.error(err);
+                        alert(`Could not load model stats: ${err.message}`);
+                    }
+                });
+
+                /* stats modal close */
+                const statsModal = document.getElementById("stats-modal");
+                statsModal.addEventListener("click", (e) => {
+                    if (
+                        e.target === statsModal ||
+                        e.target.matches(".close-btn")
+                    ) {
+                        statsModal.style.display = "none";
+                    }
+                });
             });
         </script>
 
@@ -644,6 +694,16 @@
                 <span class="close-btn">&times;</span>
                 <h2>Model details</h2>
                 <pre id="json-output"></pre>
+            </div>
+        </div>
+
+        <div id="stats-modal" class="modal">
+            <div class="modal-content">
+                <span class="close-btn">&times;</span>
+                <h2>Model Stats</h2>
+                <div id="stats-content">
+                    <p>Loading stats...</p>
+                </div>
             </div>
         </div>
     </body>
