@@ -442,12 +442,16 @@
                             const tokenValue = existingRow
                                 ? existingRow.querySelector(".token-usage")?.textContent ?? 0
                                 : 0;
+                            const digest = m.digest || "";
+                            const shortDigest = digest.length > 24
+                                ? `${digest.slice(0, 12)}...${digest.slice(-12)}`
+                                : digest;
                             return `<tr data-model="${m.name}">
                                 <td class="model">${m.name}</td>
                                 <td>${m.details.parameter_size}</td>
                                 <td>${m.details.quantization_level}</td>
                                 <td>${m.context_length}</td>
-                                <td>${m.digest}</td>
+                                <td>${shortDigest}</td>
                                 <td class="token-usage">${tokenValue}</td>
                             </tr>`;
                         })

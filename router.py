@@ -6,7 +6,8 @@ version: 0.4
 license: AGPL
 """
 # -------------------------------------------------------------
-import orjson, time, asyncio, yaml, ollama, openai, os, re, aiohttp, ssl, datetime, random, base64, io
+import orjson, time, asyncio, yaml, ollama, openai, os, re, aiohttp, ssl, random, base64, io
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Set, List, Optional
 from urllib.parse import urlparse
@@ -45,6 +46,18 @@ app_state = {
     "connector": None,
 }
 token_worker_task: asyncio.Task | None = None
+flush_task: asyncio.Task | None = None
+
+# ------------------------------------------------------------------
+# Token Count Buffer (for write-behind pattern)
+# ------------------------------------------------------------------
+# Structure: {endpoint: {model: (input_tokens, output_tokens)}}
+token_buffer: dict[str, dict[str, tuple[int, int]]] = defaultdict(lambda: defaultdict(tuple))
+# Time series buffer with timestamp
+time_series_buffer: list[dict[str, int | str]] = []
+
+# Configuration for periodic flushing
+FLUSH_INTERVAL = 10  # seconds
 
 # -------------------------------------------------------------
 # 1. Configuration loader
@@ -60,6 +73,9 @@ class Config(BaseSettings):
     max_concurrent_connections: int = 1
 
     api_keys: Dict[str, str] = Field(default_factory=dict)
+
+    # Database configuration
+    db_path: str = Field(default=os.getenv("NOMYO_ROUTER_DB_PATH", "token_counts.db"))
 
     class Config:
         # Load from `config.yaml` first, then from env variables
@@ -101,6 +117,8 @@ def _config_path_from_env() -> Path:
         return Path(candidate).expanduser()
     return Path("config.yaml")
 
+from db import TokenDatabase
+
 
 # Create the global config object – it will be overwritten on startup
 config = Config.from_yaml(_config_path_from_env())
@@ -129,6 +147,9 @@ usage_counts: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
 token_usage_counts: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
 usage_lock = asyncio.Lock()  # protects access to usage_counts
 token_usage_lock = asyncio.Lock()
+
+# Database instance
+db: "TokenDatabase" = None
 
 # -------------------------------------------------------------
 # 4. Helperfunctions 
@@ -181,7 +202,7 @@ def _format_connection_issue(url: str, error: Exception) -> str:
         )
 
     return f"Error while contacting {url}: {error}"
-    
+
 def is_ext_openai_endpoint(endpoint: str) -> bool:
     if "/v1" not in endpoint:
         return False
@@ -199,9 +220,43 @@ def is_ext_openai_endpoint(endpoint: str) -> bool:
 async def token_worker() -> None:
     while True:
         endpoint, model, prompt, comp = await token_queue.get()
+        # Accumulate counts in memory buffer
+        token_buffer[endpoint][model] = (
+            token_buffer[endpoint].get(model, (0, 0))[0] + prompt,
+            token_buffer[endpoint].get(model, (0, 0))[1] + comp
+        )
+
+        # Add to time series buffer with timestamp
+        now = datetime.now(tz=timezone.utc)
+        timestamp = int(datetime(now.year, now.month, now.day, now.hour, now.minute).timestamp())
+        time_series_buffer.append({
+            'endpoint': endpoint,
+            'model': model,
+            'input_tokens': prompt,
+            'output_tokens': comp,
+            'total_tokens': prompt + comp,
+            'timestamp': timestamp
+        })
+
+        # Update in-memory counts for immediate reporting
         async with token_usage_lock:
             token_usage_counts[endpoint][model] += (prompt + comp)
-        await publish_snapshot()
+            await publish_snapshot()
+
+async def flush_buffer() -> None:
+    """Periodically flush accumulated token counts to the database."""
+    while True:
+        await asyncio.sleep(FLUSH_INTERVAL)
+
+        # Flush token counts
+        if token_buffer:
+            await db.update_batched_counts(token_buffer)
+            token_buffer.clear()
+
+        # Flush time series entries
+        if time_series_buffer:
+            await db.add_batched_time_series(time_series_buffer)
+            time_series_buffer.clear()
 
 class fetch:
     async def available_models(endpoint: str, api_key: Optional[str] = None) -> Set[str]:
@@ -366,7 +421,7 @@ async def decrement_usage(endpoint: str, model: str) -> None:
 def iso8601_ns():
     ns = time.time_ns()
     sec, ns_rem = divmod(ns, 1_000_000_000)
-    dt = datetime.datetime.fromtimestamp(sec, tz=datetime.timezone.utc)
+    dt = datetime.fromtimestamp(sec, tz=timezone.utc)
     return (
         f"{dt.year:04d}-{dt.month:02d}-{dt.day:02d}T"
         f"{dt.hour:02d}:{dt.minute:02d}:{dt.second:02d}."
@@ -628,7 +683,6 @@ async def choose_endpoint(model: str) -> str:
                 f"None of the configured endpoints ({', '.join(config.endpoints)}) "
                 f"advertise the model '{model}'."
             )
-
     # 3️⃣  Among the candidates, find those that have the model *loaded*
     #      (concurrently, but only for the filtered list)
     load_tasks = [fetch.loaded_models(ep) for ep in candidate_endpoints]
@@ -1772,7 +1826,7 @@ async def usage_stream(request: Request):
 # -------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event() -> None:
-    global config
+    global config, db
     # Load YAML config (or use defaults if not present)
     config_path = _config_path_from_env()
     config = Config.from_yaml(config_path)
@@ -1787,7 +1841,21 @@ async def startup_event() -> None:
             f"No configuration file found at {config_path}. "
             "Falling back to default settings."
         )
-    
+
+    # Initialize database
+    db = TokenDatabase(config.db_path)
+    await db.init_db()
+
+    # Load existing token counts from database
+    async for count_entry in db.load_token_counts():
+        endpoint = count_entry['endpoint']
+        model = count_entry['model']
+        input_tokens = count_entry['input_tokens']
+        output_tokens = count_entry['output_tokens']
+        total_tokens = count_entry['total_tokens']
+
+        token_usage_counts[endpoint][model] = total_tokens
+
     ssl_context = ssl.create_default_context()
     connector = aiohttp.TCPConnector(limit=0, limit_per_host=512, ssl=ssl_context)
     timeout = aiohttp.ClientTimeout(total=60, connect=15, sock_read=120, sock_connect=15)
@@ -1796,6 +1864,7 @@ async def startup_event() -> None:
     app_state["connector"] = connector
     app_state["session"] = session
     token_worker_task = asyncio.create_task(token_worker())
+    flush_task = asyncio.create_task(flush_buffer())
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
@@ -1803,3 +1872,5 @@ async def shutdown_event() -> None:
     await app_state["session"].close()
     if token_worker_task is not None:
         token_worker_task.cancel()
+    if flush_task is not None:
+        flush_task.cancel()

@@ -1,6 +1,13 @@
 #!/usr/bin/env sh
 set -e
 
+# Create database directory if it doesn't exist
+mkdir -p /app/data
+chown -R www-data:www-data /app/data
+
+# Set database path environment variable
+export NOMYO_ROUTER_DB_PATH="/app/data/token_counts.db"
+
 CONFIG_PATH_ARG=""
 SHOW_HELP=0
 
