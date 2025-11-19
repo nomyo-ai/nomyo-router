@@ -232,6 +232,12 @@
                 height: 300px;
                 margin-top: 1rem;
             }
+            .pie-chart-container {
+                position: relative;
+                height: 250px;
+                margin-top: 1rem;
+                max-width: 400px;
+            }
         </style>
     </head>
     <body>
@@ -376,23 +382,32 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
         return;
     }
 
-    // Filter data based on selected timeframe
-    const now = new Date();
-    const cutoffTime = now.getTime() - (minutes * 60 * 1000);
+    // Filter data based on selected timeframe (use UTC for consistency)
+    const now = Date.now();
+    const cutoffTime = now - (minutes * 60 * 1000);
 
     // Group data by hour for better visualization
     const groupedData = {};
     timeSeriesData.forEach(item => {
-        const timestamp = item.timestamp * 1000;
-        if (timestamp >= cutoffTime) {
-            const date = new Date(timestamp);
-            // Group by hour (local time)
-            const hourStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        // Database stores UTC timestamps, multiply by 1000 to get milliseconds
+        const timestampMs = item.timestamp * 1000;
+        
+        if (timestampMs >= cutoffTime) {
+            // Convert UTC timestamp to local time for display
+            const date = new Date(timestampMs);
+            // Group by hour and minute in local time
+            const hourStr = date.toLocaleString([], { 
+                month: 'short', 
+                day: 'numeric', 
+                hour: '2-digit', 
+                minute: '2-digit' 
+            });
 
             if (!groupedData[hourStr]) {
                 groupedData[hourStr] = {
                     input: 0,
-                    output: 0
+                    output: 0,
+                    timestamp: timestampMs  // Keep for sorting
                 };
             }
             groupedData[hourStr].input += item.input_tokens || 0;
@@ -400,10 +415,11 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
         }
     });
 
-    // Convert to arrays for chart
-    const labels = Object.keys(groupedData).sort();
-    const inputData = labels.map(hour => groupedData[hour].input);
-    const outputData = labels.map(hour => groupedData[hour].output);
+    // Convert to arrays for chart, sorted by timestamp
+    const sortedEntries = Object.entries(groupedData).sort((a, b) => a[1].timestamp - b[1].timestamp);
+    const labels = sortedEntries.map(([label]) => label);
+    const inputData = sortedEntries.map(([, data]) => data.input);
+    const outputData = sortedEntries.map(([, data]) => data.output);
 
     console.log('Chart updated with', labels.length, 'data points');
 
@@ -770,6 +786,10 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
                             <p>Input tokens: ${data.input_tokens}</p>
                             <p>Output tokens: ${data.output_tokens}</p>
                             <p>Total tokens: ${data.total_tokens}</p>
+                            <h3>Endpoint Distribution</h3>
+                            <div class="pie-chart-container">
+                                <canvas id="endpoint-pie-chart"></canvas>
+                            </div>
                             <h3>Usage Over Time</h3>
                             <div class="timeframe-controls">
                                 <button class="timeframe-btn active" data-minutes="60">Last 1 hour</button>
@@ -783,8 +803,8 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
                         `;
                         document.getElementById("stats-modal").style.display = "flex";
 
-                        // Initialise the chart (ensures fresh canvas and chart instance)
-                        initStatsChart(data.time_series);
+                        // Initialise the charts (time-series + pie chart)
+                        initStatsChart(data.time_series, data.endpoint_distribution);
                     } catch (err) {
                         console.error(err);
                         alert(`Could not load model stats: ${err.message}`);
@@ -792,8 +812,9 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
                 });
 
 /* ---------- Helper to initialise or refresh the stats chart ---------- */
-function initStatsChart(timeSeriesData) {
+function initStatsChart(timeSeriesData, endpointDistribution) {
     console.log('initStatsChart called with payload:', timeSeriesData);
+    console.log('Endpoint distribution:', endpointDistribution);
     // Destroy any existing chart instance
     if (statsChart) {
         statsChart.destroy();
@@ -856,6 +877,57 @@ function initStatsChart(timeSeriesData) {
             renderTimeSeriesChart(rawTimeSeries, statsChart, minutes);
         });
     });
+
+    // Create endpoint distribution pie chart
+    if (endpointDistribution && Object.keys(endpointDistribution).length > 0) {
+        const pieCanvas = document.getElementById('endpoint-pie-chart');
+        const pieCtx = pieCanvas.getContext('2d');
+        
+        const endpoints = Object.keys(endpointDistribution);
+        const tokenCounts = Object.values(endpointDistribution);
+        const colors = endpoints.map(ep => getColor(ep));
+        
+        new Chart(pieCtx, {
+            type: 'pie',
+            data: {
+                labels: endpoints,
+                datasets: [{
+                    data: tokenCounts,
+                    backgroundColor: colors,
+                    borderWidth: 1,
+                    borderColor: '#fff'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'right',
+                        labels: {
+                            boxWidth: 12,
+                            font: { size: 11 }
+                        }
+                    },
+                    title: {
+                        display: true,
+                        text: 'Total Tokens per Endpoint'
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const label = context.label || '';
+                                const value = context.parsed || 0;
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const percentage = ((value / total) * 100).toFixed(1);
+                                return `${label}: ${value.toLocaleString()} tokens (${percentage}%)`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
 }
                 /* stats modal close */
                 // The close handler is already attached during initial page load.

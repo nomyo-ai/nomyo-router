@@ -1196,21 +1196,27 @@ async def stats_proxy(request: Request, model: Optional[str] = None):
     # Get time series data for the last 30 days (43200 minutes = 30 days)
     # Assuming entries are grouped by minute, 30 days = 43200 entries max
     time_series = []
+    endpoint_totals = defaultdict(int)  # Track tokens per endpoint
+    
     async for entry in db.get_latest_time_series(limit=50000):
         if entry['model'] == model:
             time_series.append({
+                'endpoint': entry['endpoint'],
                 'timestamp': entry['timestamp'],
                 'input_tokens': entry['input_tokens'],
                 'output_tokens': entry['output_tokens'],
                 'total_tokens': entry['total_tokens']
             })
+            # Accumulate total tokens per endpoint
+            endpoint_totals[entry['endpoint']] += entry['total_tokens']
 
     return {
         'model': model,
         'input_tokens': token_data['input_tokens'],
         'output_tokens': token_data['output_tokens'],
         'total_tokens': token_data['total_tokens'],
-        'time_series': time_series
+        'time_series': time_series,
+        'endpoint_distribution': dict(endpoint_totals)
     }
 
 # -------------------------------------------------------------
