@@ -1193,9 +1193,10 @@ async def stats_proxy(request: Request, model: Optional[str] = None):
             status_code=404, detail="No token data found for this model"
         )
 
-    # Get time series data
+    # Get time series data for the last 30 days (43200 minutes = 30 days)
+    # Assuming entries are grouped by minute, 30 days = 43200 entries max
     time_series = []
-    async for entry in db.get_latest_time_series(limit=10):
+    async for entry in db.get_latest_time_series(limit=50000):
         if entry['model'] == model:
             time_series.append({
                 'timestamp': entry['timestamp'],
