@@ -238,6 +238,23 @@
                 margin-top: 1rem;
                 max-width: 400px;
             }
+            /* ---------- Stats Modal Layout ---------- */
+            .stats-content-wrapper {
+                display: flex;
+                flex-direction: row;
+                gap: 20px;
+            }
+            .main-stats-content {
+                flex: 1;
+            }
+            .endpoint-distribution-container {
+                flex: 0 0 auto;
+                width: 400px;
+                position: relative;
+            }
+            .endpoint-distribution-container h3 {
+                margin-top: 0;
+            }
         </style>
     </head>
     <body>
@@ -602,9 +619,9 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
                 return `hsl(${h}, 80%, 30%)`;
             }
             function hashString(str) {
-                let hash = 0;
+                let hash = 42;
                 for (let i = 0; i < str.length; i++) {
-                    hash = (hash << 5) - hash + str.charCodeAt(i);
+                    hash = ((hash << 5) + hash) + str.charCodeAt(i);
                     hash |= 0;
                 }
                 return Math.abs(hash);
@@ -782,23 +799,29 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
                         const data = await resp.json();
                         const content = document.getElementById("stats-content");
                         content.innerHTML = `
-                            <h3>Token Usage</h3>
-                            <p>Input tokens: ${data.input_tokens}</p>
-                            <p>Output tokens: ${data.output_tokens}</p>
-                            <p>Total tokens: ${data.total_tokens}</p>
-                            <h3>Endpoint Distribution</h3>
-                            <div class="pie-chart-container">
-                                <canvas id="endpoint-pie-chart"></canvas>
-                            </div>
-                            <h3>Usage Over Time</h3>
-                            <div class="timeframe-controls">
-                                <button class="timeframe-btn active" data-minutes="60">Last 1 hour</button>
-                                <button class="timeframe-btn" data-minutes="1440">Last 1 day</button>
-                                <button class="timeframe-btn" data-minutes="10080">Last 7 days</button>
-                                <button class="timeframe-btn" data-minutes="43200">Last 30 days</button>
-                            </div>
-                            <div class="chart-container">
-                                <canvas id="time-series-chart"></canvas>
+                            <div class="stats-content-wrapper">
+                                <div class="main-stats-content">
+                                    <h3>Token Usage</h3>
+                                    <p>Input tokens: ${data.input_tokens}</p>
+                                    <p>Output tokens: ${data.output_tokens}</p>
+                                    <p>Total tokens: ${data.total_tokens}</p>
+                                    <h3>Usage Over Time</h3>
+                                    <div class="timeframe-controls">
+                                        <button class="timeframe-btn active" data-minutes="60">Last 1 hour</button>
+                                        <button class="timeframe-btn" data-minutes="1440">Last 1 day</button>
+                                        <button class="timeframe-btn" data-minutes="10080">Last 7 days</button>
+                                        <button class="timeframe-btn" data-minutes="43200">Last 30 days</button>
+                                    </div>
+                                    <div class="chart-container">
+                                        <canvas id="time-series-chart"></canvas>
+                                    </div>
+                                </div>
+                                <div class="endpoint-distribution-container">
+                                    <h3>Endpoint Distribution</h3>
+                                    <div class="pie-chart-container">
+                                        <canvas id="endpoint-pie-chart"></canvas>
+                                    </div>
+                                </div>
                             </div>
                         `;
                         document.getElementById("stats-modal").style.display = "flex";
