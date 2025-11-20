@@ -226,9 +226,9 @@ async def token_worker() -> None:
             token_buffer[endpoint].get(model, (0, 0))[1] + comp
         )
 
-        # Add to time series buffer with timestamp
+        # Add to time series buffer with timestamp (UTC)
         now = datetime.now(tz=timezone.utc)
-        timestamp = int(datetime(now.year, now.month, now.day, now.hour, now.minute).timestamp())
+        timestamp = int(datetime(now.year, now.month, now.day, now.hour, now.minute, tzinfo=timezone.utc).timestamp())
         time_series_buffer.append({
             'endpoint': endpoint,
             'model': model,

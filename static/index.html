@@ -396,46 +396,102 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
     return;
   }
 
-  /* ── 1️⃣  Cut‑off & bucket interval ──────────────────────────────── */
-  const nowMs   = Date.now();                       // UTC millis
-  const cutoffMs = nowMs - minutes * 60 * 1000;     // UTC window start
-  const intervalMs = 60 * 60 * 1000;                // 1 h buckets
-
-  /* ── 2️⃣  Build ordered bucket slots (UTC) ───────────────────────────── */
-  const slots = [];
-  for (let ts = cutoffMs; ts <= nowMs; ts += intervalMs) {
-    slots.push(ts);
+  /* ── 1️⃣  Determine bucket interval based on timeframe ──────────────────── */
+  let intervalMs;
+  let timeFormat;
+  
+  if (minutes <= 60) {
+    // 1 hour: 5-minute buckets
+    intervalMs = 5 * 60 * 1000;
+    timeFormat = { hour: '2-digit', minute: '2-digit' };
+  } else if (minutes <= 1440) {
+    // 1 day: 1-hour buckets
+    intervalMs = 60 * 60 * 1000;
+    timeFormat = { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' };
+  } else if (minutes <= 10080) {
+    // 7 days: 6-hour buckets
+    intervalMs = 6 * 60 * 60 * 1000;
+    timeFormat = { month: 'short', day: 'numeric', hour: '2-digit' };
+  } else {
+    // 30 days: 1-day buckets
+    intervalMs = 24 * 60 * 60 * 1000;
+    timeFormat = { month: 'short', day: 'numeric' };
   }
 
-  /* ── 3️⃣  Aggregate raw rows into those slots ───────────────────────────── */
-  const bucketMap = {};            // epoch ms → {input, output}
-  timeSeriesData.forEach(row => {
-    // If your DB already stores ms, drop the * 1000
-    const tsMs = row.timestamp * 1000;   // <-- keep *1000 **only** if the DB stores seconds
-    if (tsMs < cutoffMs || tsMs > nowMs) return;
+  /* ── 2️⃣  Get current time in local timezone ──────────────────────────── */
+  const now = new Date();
+  const nowMs = now.getTime();
+  const cutoffMs = nowMs - minutes * 60 * 1000;
 
-    const slot = Math.floor((tsMs - cutoffMs) / intervalMs) * intervalMs + cutoffMs;
-    if (!bucketMap[slot]) bucketMap[slot] = { input: 0, output: 0 };
-    bucketMap[slot].input  += row.input_tokens  || 0;
-    bucketMap[slot].output += row.output_tokens || 0;
+  /* ── 3️⃣  Build ordered bucket slots aligned to local time boundaries ───── */
+  const slots = [];
+  
+  // Round cutoff down to nearest bucket interval in local time
+  const cutoffDate = new Date(cutoffMs);
+  let startDate = new Date(cutoffDate);
+  
+  if (minutes <= 60) {
+    // Align to 5-minute boundaries
+    startDate.setMinutes(Math.floor(startDate.getMinutes() / 5) * 5, 0, 0);
+  } else if (minutes <= 1440) {
+    // Align to hour boundaries
+    startDate.setMinutes(0, 0, 0);
+  } else if (minutes <= 10080) {
+    // Align to 6-hour boundaries (00:00, 06:00, 12:00, 18:00)
+    startDate.setHours(Math.floor(startDate.getHours() / 6) * 6, 0, 0, 0);
+  } else {
+    // Align to day boundaries
+    startDate.setHours(0, 0, 0, 0);
+  }
+  
+  let slotTime = startDate.getTime();
+  while (slotTime <= nowMs) {
+    slots.push(slotTime);
+    slotTime += intervalMs;
+  }
+
+  /* ── 4️⃣  Aggregate raw rows into local time buckets ───────────────────── */
+  const bucketMap = {};
+  
+  timeSeriesData.forEach(row => {
+    // Database stores UTC timestamps in seconds, convert to local time milliseconds
+    const utcTimestampMs = row.timestamp * 1000;
+    
+    // Check if within our time window
+    if (utcTimestampMs < cutoffMs || utcTimestampMs > nowMs) return;
+    
+    // Find which bucket this timestamp belongs to
+    let closestSlot = null;
+    let minDiff = Infinity;
+    
+    for (const slot of slots) {
+      const diff = Math.abs(utcTimestampMs - slot);
+      if (diff < minDiff && diff < intervalMs) {
+        minDiff = diff;
+        closestSlot = slot;
+      }
+    }
+    
+    if (closestSlot !== null) {
+      if (!bucketMap[closestSlot]) bucketMap[closestSlot] = { input: 0, output: 0 };
+      bucketMap[closestSlot].input  += row.input_tokens  || 0;
+      bucketMap[closestSlot].output += row.output_tokens || 0;
+    }
   });
 
-  /* ── 4️⃣  Build labels & data arrays (UTC labels) ──────────────────────── */
-  const labels    = slots.map(ts => {
-    const d = new Date(ts);   // UTC millisecond timestamp
-    return d.toLocaleString(undefined, {    // <-- force UTC for display
-      month:   'short',
-      day:     'numeric',
-      hour:    '2-digit',
-      minute:  '2-digit',
+  /* ── 5️⃣  Build labels in local timezone ───────────────────────────────── */
+  const labels = slots.map(ts => {
+    const d = new Date(ts);
+    return d.toLocaleString(undefined, {
+      ...timeFormat,
       timeZoneName: 'short'
-    }).replace(/UTC$/, 'UTC'); // keep the “UTC” suffix if you like
+    });
   });
 
   const inputData  = slots.map(ts => (bucketMap[ts]?.input  ?? 0));
   const outputData = slots.map(ts => (bucketMap[ts]?.output ?? 0));
 
-  /* ── 5️⃣  Push into the Chart.js instance ─────────────────────────────── */
+  /* ── 6️⃣  Push into the Chart.js instance ─────────────────────────────── */
   chart.data.labels = labels;
   chart.data.datasets[0].data = inputData;
   chart.data.datasets[1].data = outputData;
