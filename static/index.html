@@ -229,7 +229,7 @@
             }
             .chart-container {
                 position: relative;
-                height: 300px;
+                height: 600px;
                 margin-top: 1rem;
             }
             .pie-chart-container {
@@ -387,64 +387,59 @@ document.addEventListener('DOMContentLoaded', () => {
 
 /* ---------- Global renderTimeSeriesChart ---------- */
 function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
-    console.log('renderTimeSeriesChart called with minutes:', minutes, 'data length:', timeSeriesData?.length);
-    
-    // Safety check
-    if (!timeSeriesData || !Array.isArray(timeSeriesData)) {
-        console.warn('No valid time series data provided');
-        chart.data.labels = [];
-        chart.data.datasets[0].data = [];
-        chart.data.datasets[1].data = [];
-        chart.update();
-        return;
-    }
-
-    // Filter data based on selected timeframe (use UTC for consistency)
-    const now = Date.now();
-    const cutoffTime = now - (minutes * 60 * 1000);
-
-    // Group data by hour for better visualization
-    const groupedData = {};
-    timeSeriesData.forEach(item => {
-        // Database stores UTC timestamps, multiply by 1000 to get milliseconds
-        const timestampMs = item.timestamp * 1000;
-        
-        if (timestampMs >= cutoffTime) {
-            // Convert UTC timestamp to local time for display
-            const date = new Date(timestampMs);
-            // Group by hour and minute in local time
-            const hourStr = date.toLocaleString([], { 
-                month: 'short', 
-                day: 'numeric', 
-                hour: '2-digit', 
-                minute: '2-digit' 
-            });
-
-            if (!groupedData[hourStr]) {
-                groupedData[hourStr] = {
-                    input: 0,
-                    output: 0,
-                    timestamp: timestampMs  // Keep for sorting
-                };
-            }
-            groupedData[hourStr].input += item.input_tokens || 0;
-            groupedData[hourStr].output += item.output_tokens || 0;
-        }
-    });
-
-    // Convert to arrays for chart, sorted by timestamp
-    const sortedEntries = Object.entries(groupedData).sort((a, b) => a[1].timestamp - b[1].timestamp);
-    const labels = sortedEntries.map(([label]) => label);
-    const inputData = sortedEntries.map(([, data]) => data.input);
-    const outputData = sortedEntries.map(([, data]) => data.output);
-
-    console.log('Chart updated with', labels.length, 'data points');
-
-    // Update chart data
-    chart.data.labels = labels;
-    chart.data.datasets[0].data = inputData;
-    chart.data.datasets[1].data = outputData;
+  // Guard clause
+  if (!Array.isArray(timeSeriesData) || !timeSeriesData.length) {
+    chart.data.labels = [];
+    chart.data.datasets[0].data = [];
+    chart.data.datasets[1].data = [];
     chart.update();
+    return;
+  }
+
+  /* ── 1️⃣  Cut‑off & bucket interval ──────────────────────────────── */
+  const nowMs   = Date.now();                       // UTC millis
+  const cutoffMs = nowMs - minutes * 60 * 1000;     // UTC window start
+  const intervalMs = 60 * 60 * 1000;                // 1 h buckets
+
+  /* ── 2️⃣  Build ordered bucket slots (UTC) ───────────────────────────── */
+  const slots = [];
+  for (let ts = cutoffMs; ts <= nowMs; ts += intervalMs) {
+    slots.push(ts);
+  }
+
+  /* ── 3️⃣  Aggregate raw rows into those slots ───────────────────────────── */
+  const bucketMap = {};            // epoch ms → {input, output}
+  timeSeriesData.forEach(row => {
+    // If your DB already stores ms, drop the * 1000
+    const tsMs = row.timestamp * 1000;   // <-- keep *1000 **only** if the DB stores seconds
+    if (tsMs < cutoffMs || tsMs > nowMs) return;
+
+    const slot = Math.floor((tsMs - cutoffMs) / intervalMs) * intervalMs + cutoffMs;
+    if (!bucketMap[slot]) bucketMap[slot] = { input: 0, output: 0 };
+    bucketMap[slot].input  += row.input_tokens  || 0;
+    bucketMap[slot].output += row.output_tokens || 0;
+  });
+
+  /* ── 4️⃣  Build labels & data arrays (UTC labels) ──────────────────────── */
+  const labels    = slots.map(ts => {
+    const d = new Date(ts);   // UTC millisecond timestamp
+    return d.toLocaleString(undefined, {    // <-- force UTC for display
+      month:   'short',
+      day:     'numeric',
+      hour:    '2-digit',
+      minute:  '2-digit',
+      timeZoneName: 'short'
+    }).replace(/UTC$/, 'UTC'); // keep the “UTC” suffix if you like
+  });
+
+  const inputData  = slots.map(ts => (bucketMap[ts]?.input  ?? 0));
+  const outputData = slots.map(ts => (bucketMap[ts]?.output ?? 0));
+
+  /* ── 5️⃣  Push into the Chart.js instance ─────────────────────────────── */
+  chart.data.labels = labels;
+  chart.data.datasets[0].data = inputData;
+  chart.data.datasets[1].data = outputData;
+  chart.update();
 }
             /* ---------- Utility ---------- */
             async function fetchJSON(url) {
