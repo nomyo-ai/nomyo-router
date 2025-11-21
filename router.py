@@ -1596,7 +1596,7 @@ async def openai_chat_completions_proxy(request: Request):
         optional_params = {
             "tools": tools,
             "response_format": response_format,
-            "stream_options": stream_options,
+            "stream_options": stream_options or {"include_usage": True },
             "max_completion_tokens": max_completion_tokens,
             "max_tokens": max_tokens,
             "temperature": temperature,
@@ -1638,8 +1638,17 @@ async def openai_chat_completions_proxy(request: Request):
                         if hasattr(chunk, "model_dump_json")
                         else orjson.dumps(chunk)
                     )
-                    if chunk.choices[0].delta.content is not None:
-                        yield f"data: {data}\n\n".encode("utf-8")
+                    if chunk.choices:
+                        if chunk.choices[0].delta.content is not None:
+                            yield f"data: {data}\n\n".encode("utf-8")
+                    if chunk.usage is not None:
+                        prompt_tok = chunk.usage.prompt_tokens or 0
+                        comp_tok   = chunk.usage.completion_tokens or 0
+                        if prompt_tok != 0 or comp_tok != 0:
+                            if not is_ext_openai_endpoint(endpoint):
+                                    if not ":" in model:
+                                        model = model+":latest"
+                            await token_queue.put((endpoint, model, prompt_tok, comp_tok))
                 yield b"data: [DONE]\n\n"
             else:
                 prompt_tok = async_gen.usage.prompt_tokens or 0
@@ -1706,7 +1715,7 @@ async def openai_completions_proxy(request: Request):
             "seed": seed,
             "stop": stop,
             "stream": stream,
-            "stream_options": stream_options,
+            "stream_options": stream_options or {"include_usage": True },
             "temperature": temperature,
             "top_p": top_p,
             "max_tokens": max_tokens,
@@ -1734,7 +1743,7 @@ async def openai_completions_proxy(request: Request):
     oclient = openai.AsyncOpenAI(base_url=base_url, default_headers=default_headers, api_key=config.api_keys[endpoint])
 
     # 3. Async generator that streams completions data and decrements the counter
-    async def stream_ocompletions_response():
+    async def stream_ocompletions_response(model=model):
         try:
             # The chat method returns a generator of dicts (or GenerateResponse)
             async_gen = await oclient.completions.create(**params)
@@ -1745,7 +1754,17 @@ async def openai_completions_proxy(request: Request):
                         if hasattr(chunk, "model_dump_json")
                         else orjson.dumps(chunk)
                     )
-                    yield f"data: {data}\n\n".encode("utf-8")
+                    if chunk.choices:
+                        if chunk.choices[0].finish_reason == None:
+                            yield f"data: {data}\n\n".encode("utf-8")
+                    if chunk.usage is not None:
+                            prompt_tok = chunk.usage.prompt_tokens or 0
+                            comp_tok   = chunk.usage.completion_tokens or 0
+                            if prompt_tok != 0 or comp_tok != 0:
+                                if not is_ext_openai_endpoint(endpoint):
+                                    if not ":" in model:
+                                        model = model+":latest"
+                                await token_queue.put((endpoint, model, prompt_tok, comp_tok))
                 # Final DONE event
                 yield b"data: [DONE]\n\n"
             else:
