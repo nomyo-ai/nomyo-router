@@ -1647,8 +1647,8 @@ async def openai_chat_completions_proxy(request: Request):
                         if prompt_tok != 0 or comp_tok != 0:
                             if not is_ext_openai_endpoint(endpoint):
                                     if not ":" in model:
-                                        model = model+":latest"
-                            await token_queue.put((endpoint, model, prompt_tok, comp_tok))
+                                        local_model = model+":latest"
+                            await token_queue.put((endpoint, local_model, prompt_tok, comp_tok))
                 yield b"data: [DONE]\n\n"
             else:
                 prompt_tok = async_gen.usage.prompt_tokens or 0
@@ -1763,8 +1763,8 @@ async def openai_completions_proxy(request: Request):
                             if prompt_tok != 0 or comp_tok != 0:
                                 if not is_ext_openai_endpoint(endpoint):
                                     if not ":" in model:
-                                        model = model+":latest"
-                                await token_queue.put((endpoint, model, prompt_tok, comp_tok))
+                                        local_model = model+":latest"
+                                await token_queue.put((endpoint, local_model, prompt_tok, comp_tok))
                 # Final DONE event
                 yield b"data: [DONE]\n\n"
             else:
