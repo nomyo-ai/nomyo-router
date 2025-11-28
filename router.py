@@ -2,7 +2,7 @@
 title: NOMYO Router - an Ollama Proxy with Endpoint:Model aware routing
 author: alpha-nerd-nomyo
 author_url: https://github.com/nomyo-ai
-version: 0.4
+version: 0.5
 license: AGPL
 """
 # -------------------------------------------------------------
@@ -1164,6 +1164,21 @@ async def show_proxy(request: Request, model: Optional[str] = None):
     return show
 
 # -------------------------------------------------------------
+@app.get("/api/token_counts")
+async def token_counts_proxy():
+    breakdown = []
+    total = 0
+    async for entry in db.load_token_counts():
+        total += entry['total_tokens']
+        breakdown.append({
+            "endpoint": entry["endpoint"],
+            "model": entry["model"],
+            "input_tokens": entry["input_tokens"],
+            "output_tokens": entry["output_tokens"],
+            "total_tokens": entry["total_tokens"],
+        })
+    return {"total_tokens": total, "breakdown": breakdown}
+
 # 12. API route – Stats
 # -------------------------------------------------------------
 @app.post("/api/stats")

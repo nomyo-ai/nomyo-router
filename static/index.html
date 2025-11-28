@@ -256,13 +256,21 @@
             .endpoint-distribution-container h3 {
                 margin-top: 0;
             }
+            .header-row {
+                display: flex;
+                align-items: center;   /* vertically center the button with the headline */
+                gap: 1rem;
+            }        
         </style>
     </head>
     <body>
         <a href="https://www.nomyo.ai" target="_blank"
             ><img src="./static/228394408.png" width="100px" height="100px"
         /></a>
-        <h1>Router Dashboard</h1>
+        <div class="header-row">
+            <h1>Router Dashboard</h1>
+            <button id="total-tokens-btn">Stats Total</button>
+        </div>
 
         <button onclick="toggleDarkMode()" id="dark-mode-button">
             🌗
@@ -352,6 +360,7 @@
 let statsModal = null;      // stats modal element
 let statsChart = null;      // Chart.js instance inside the modal
 let rawTimeSeries = null;   // raw time‑series data for the current model
+let totalTokensChart = null; // Chart.js instance for total tokens modal
 
 /* Integrated modal initialization and close handling into the main load block */
 
@@ -600,25 +609,26 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
                                 e.preventDefault();
                                 const model = link.dataset.model;
                                 const ok = confirm(
-                                    `Delete the model “${model}”? This cannot be undone.`,
+                                    `Delete the model "${model}"? This cannot be undone.`,
                                 );
-                                if (!ok) return;
-                                try {
-                                    const resp = await fetch(
-                                        `/api/delete?model=${encodeURIComponent(model)}`,
-                                        { method: "DELETE" },
-                                    );
-                                    if (!resp.ok)
-                                        throw new Error(
-                                            `Delete failed: ${resp.status}`,
+                                if (ok) {
+                                    try {
+                                        const resp = await fetch(
+                                            `/api/delete?model=${encodeURIComponent(model)}`,
+                                            { method: "DELETE" },
                                         );
-                                    alert(
-                                        `Model “${model}” deleted successfully.`,
-                                    );
-                                    loadTags();
-                                } catch (err) {
-                                    console.error(err);
-                                    alert(`Error deleting ${model}: ${err}`);
+                                        if (!resp.ok)
+                                            throw new Error(
+                                                `Delete failed: ${resp.status}`,
+                                            );
+                                        alert(
+                                            `Model "${model}" deleted successfully.`,
+                                        );
+                                        loadTags();
+                                    } catch (err) {
+                                        console.error(err);
+                                        alert(`Error deleting ${model}: ${err}`);
+                                    }
                                 }
                             });
                         });
@@ -653,8 +663,8 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
                             </tr>`;
                         })
                         .join("");
-                        psRows.clear();
-                        document
+                    psRows.clear();
+                    document
                         .querySelectorAll("#ps-body tr[data-model]")
                         .forEach((row) => {
                             const model = row.dataset.model;
@@ -682,9 +692,7 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
                 // Create the EventSource once and keep it around
                 const source = new EventSource("/api/usage-stream");
 
-                // -----------------------------------------------------------------
                 // Helper that receives the payload and renders the chart
-                // -----------------------------------------------------------------
                 const renderChart = (data) => {
                     const chart = document.getElementById("usage-chart");
                     const usage = data.usage_counts || {};
@@ -715,9 +723,7 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
                     chart.innerHTML = html;
                 };
 
-                // -----------------------------------------------------------------
                 // Event handlers
-                // -----------------------------------------------------------------
                 source.onmessage = (e) => {
                     try {
                         const payload = JSON.parse(e.data); // SSE sends plain text
@@ -726,18 +732,9 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
                         const tokens  = payload.token_usage_counts || {};
 
                         psRows.forEach((row, model) => {
-                            /* regular usage count – optional if you want to keep it */
-                            let total = 0;
-                            for (const ep in usage) {
-                            total += usage[ep][model] || 0;
-                            }
-                            const usageCell = row.querySelector(".usage");
-                            if (usageCell) usageCell.textContent = total;
-
-                            /* token usage */
                             let tokenTotal = 0;
                             for (const ep in tokens) {
-                            tokenTotal += tokens[ep][model] || 0;
+                                tokenTotal += tokens[ep][model] || 0;
                             }
                             const tokenCell = row.querySelector(".token-usage");
                             if (tokenCell) tokenCell.textContent = tokenTotal;
@@ -749,7 +746,6 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
 
                 source.onerror = (err) => {
                     console.error("SSE connection error. Retrying...", err);
-                    // EventSource will automatically try to reconnect.
                 };
                 window.addEventListener("beforeunload", () => source.close());
             }
@@ -762,8 +758,6 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
                 loadUsage();
                 setInterval(loadPS, 60_000);
                 setInterval(loadEndpoints, 300_000);
-
-/* (renderTimeSeriesChart removed – will be defined globally) */
 
                 /* show logic */
                 document.body.addEventListener("click", async (e) => {
@@ -888,8 +882,6 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
 
 /* ---------- Helper to initialise or refresh the stats chart ---------- */
 function initStatsChart(timeSeriesData, endpointDistribution) {
-    console.log('initStatsChart called with payload:', timeSeriesData);
-    console.log('Endpoint distribution:', endpointDistribution);
     // Destroy any existing chart instance
     if (statsChart) {
         statsChart.destroy();
@@ -934,10 +926,9 @@ function initStatsChart(timeSeriesData, endpointDistribution) {
     statsChart = chart;
 
     // Store the raw time‑series data globally
-    console.log('initStatsChart raw data:', timeSeriesData);
     rawTimeSeries = timeSeriesData || [];
 
-    // Render the initial view (default to 60 minutes)
+    // Render the initial view (default to 60 minutes)
     renderTimeSeriesChart(rawTimeSeries, statsChart, 60);
 
     // Attach timeframe button handlers (once)
@@ -1004,11 +995,112 @@ function initStatsChart(timeSeriesData, endpointDistribution) {
         });
     }
 }
-                /* stats modal close */
-                // The close handler is already attached during initial page load.
-                // No additional listener is needed here.
             });
         </script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const totalBtn = document.getElementById('total-tokens-btn');
+    if (totalBtn) {
+        totalBtn.addEventListener('click', async () => {
+            try {
+                const resp = await fetch('/api/token_counts');
+                const data = await resp.json();
+                const modal = document.getElementById('total-tokens-modal');
+                const numberEl = document.getElementById('total-tokens-number');
+                numberEl.textContent = data.total_tokens;
+                const chartCanvas = document.getElementById('total-tokens-chart');
+                if (chartCanvas) {
+                    // Destroy existing chart if it exists
+                    if (totalTokensChart) {
+                        totalTokensChart.destroy();
+                        totalTokensChart = null;
+                    }
+                    
+                    const ctx = chartCanvas.getContext('2d');
+                    const tokenCounts = data.breakdown || [];
+                    /* NEW LOGIC: concentric rings per model */
+                    const modelTotals = {};
+                    const modelEndpointTotals = {};
+                    tokenCounts.forEach(entry => {
+                        const { model, endpoint, total_tokens } = entry;
+                        modelTotals[model] = (modelTotals[model] || 0) + total_tokens;
+                        if (!modelEndpointTotals[model]) modelEndpointTotals[model] = {};
+                        modelEndpointTotals[model][endpoint] = (modelEndpointTotals[model][endpoint] || 0) + total_tokens;
+                    });
+                    const endpointsSet = new Set();
+                    tokenCounts.forEach(entry => endpointsSet.add(entry.endpoint));
+                    const endpoints = Array.from(endpointsSet);
+                    const endpointColors = {};
+                    endpoints.forEach(ep => {
+                        endpointColors[ep] = getColor(ep);
+                    });
+                    const sortedModels = Object.keys(modelTotals).sort((a, b) => modelTotals[b] - modelTotals[a]);
+                    const datasets = sortedModels.map(model => {
+                        const data = endpoints.map(ep => (modelEndpointTotals[model][ep] || 0));
+                        const backgroundColor = endpoints.map(ep => endpointColors[ep]);
+                        return {
+                            label: model,
+                            data,
+                            backgroundColor,
+                            borderWidth: 1,
+                            borderColor: '#fff'
+                        };
+                    });
+                    totalTokensChart = new Chart(ctx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: endpoints,
+                            datasets
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            cutout: '15%',
+                            plugins: {
+                                legend: {
+                                    position: 'right',
+                                    labels: {
+                                        boxWidth: 12,
+                                        font: { size: 11 }
+                                    }
+                                },
+                                title: {
+                                    display: true,
+                                    text: 'Token Distribution by Endpoint per Model'
+                                },
+                                tooltip: {
+                                    callbacks: {
+                                        label: function(context) {
+                                            const endpointName = context.chart.data.labels[context.dataIndex];
+                                            const modelName = context.dataset.label;
+                                            const value = context.parsed || 0;
+                                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                            const percentage = ((value / total) * 100).toFixed(1);
+                                            return `${modelName} - ${endpointName}: ${value.toLocaleString()} tokens (${percentage}%)`;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+                modal.style.display = 'flex';
+            } catch (err) {
+                console.error(err);
+                alert('Failed to load token counts');
+            }
+        });
+    }
+    const totalTokensModal = document.getElementById('total-tokens-modal');
+    if (totalTokensModal) {
+        totalTokensModal.addEventListener('click', (e) => {
+            if (e.target === totalTokensModal || e.target.matches('.close-btn')) {
+                totalTokensModal.style.display = 'none';
+            }
+        });
+    }
+});
+</script>
 
         <div id="show-modal" class="modal">
             <div class="modal-content">
@@ -1027,5 +1119,12 @@ function initStatsChart(timeSeriesData, endpointDistribution) {
                 </div>
             </div>
         </div>
-    </body>
+    <div id="total-tokens-modal" class="modal">
+  <div class="modal-content">
+    <span class="close-btn">&times;</span>
+    <h2>Total Tokens</h2>
+    <p id="total-tokens-number"></p>
+    <canvas id="total-tokens-chart"></canvas>
+  </div>
+</div>
 </html>
