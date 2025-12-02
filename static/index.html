@@ -269,7 +269,7 @@
         /></a>
         <div class="header-row">
             <h1>Router Dashboard</h1>
-            <button id="total-tokens-btn">Stats Total</button>
+            <button id="total-tokens-btn">Stats Total</button><span id="aggregation-status" class="loading" style="margin-left:8px;"></span>
         </div>
 
         <button onclick="toggleDarkMode()" id="dark-mode-button">
@@ -1008,6 +1008,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 const modal = document.getElementById('total-tokens-modal');
                 const numberEl = document.getElementById('total-tokens-number');
                 numberEl.textContent = data.total_tokens;
+                document.getElementById('aggregation-status').textContent = 'Aggregating...';
+                try {
+                    const aggResp = await fetch('/api/aggregate_time_series_days', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ days: 30 , trim_old: true})
+                    });
+                    if (aggResp.ok) {
+                        const aggData = await aggResp.json();
+                        const aggr = aggData.aggregated_groups ?? 0;
+                        document.getElementById('aggregation-status').textContent = `Aggregated ${aggr} groups`;
+                    } else {
+                        document.getElementById('aggregation-status').textContent = 'Aggregation failed';
+                    }
+                } catch (err) {
+                    document.getElementById('aggregation-status').textContent = 'Aggregation error';
+                }
                 const chartCanvas = document.getElementById('total-tokens-chart');
                 if (chartCanvas) {
                     // Destroy existing chart if it exists
@@ -1066,7 +1083,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 },
                                 title: {
                                     display: true,
-                                    text: 'Token Distribution by Endpoint per Model'
+                                    text: 'Token Distribution by Model per Endpoint'
                                 },
                                 tooltip: {
                                     callbacks: {

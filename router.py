@@ -52,7 +52,7 @@ flush_task: asyncio.Task | None = None
 # Token Count Buffer (for write-behind pattern)
 # ------------------------------------------------------------------
 # Structure: {endpoint: {model: (input_tokens, output_tokens)}}
-token_buffer: dict[str, dict[str, tuple[int, int]]] = defaultdict(lambda: defaultdict(tuple))
+token_buffer: dict[str, dict[str, tuple[int, int]]] = defaultdict(lambda: defaultdict(lambda: (0, 0)))
 # Time series buffer with timestamp
 time_series_buffer: list[dict[str, int | str]] = []
 
@@ -257,6 +257,29 @@ async def flush_buffer() -> None:
         if time_series_buffer:
             await db.add_batched_time_series(time_series_buffer)
             time_series_buffer.clear()
+
+async def flush_remaining_buffers() -> None:
+    """
+    Flush any in-memory buffers to the database on shutdown.
+    This is designed to be safely invoked during shutdown and should not raise.
+    """
+    try:
+        flushed_entries = 0
+        if token_buffer:
+            await db.update_batched_counts(token_buffer)
+            flushed_entries += sum(len(v) for v in token_buffer.values())
+            token_buffer.clear()
+        if time_series_buffer:
+            await db.add_batched_time_series(time_series_buffer)
+            flushed_entries += len(time_series_buffer)
+            time_series_buffer.clear()
+        if flushed_entries:
+            print(f"[shutdown] Flushed {flushed_entries} in-memory entries to DB on shutdown.")
+        else:
+            print("[shutdown] No in-memory entries to flush on shutdown.")
+    except Exception as e:
+        # Do not raise during shutdown – log and continue teardown
+        print(f"[shutdown] Error flushing remaining buffers: {e}")
 
 class fetch:
     async def available_models(endpoint: str, api_key: Optional[str] = None) -> Set[str]:
@@ -1179,6 +1202,26 @@ async def token_counts_proxy():
         })
     return {"total_tokens": total, "breakdown": breakdown}
 
+@app.post("/api/aggregate_time_series_days")
+async def aggregate_time_series_days_proxy(request: Request):
+    """
+    Aggregate time_series entries older than days into daily aggregates by endpoint/model/date.
+    """
+    try:
+        body_bytes = await request.body()
+        if not body_bytes:
+            days = 30
+            trim_old = False
+        else:
+            payload = orjson.loads(body_bytes.decode("utf-8"))
+            days = int(payload.get("days", 30))
+            trim_old = bool(payload.get("trim_old", False))
+    except Exception:
+        days = 30
+        trim_old = False
+    aggregated = await db.aggregate_time_series_older_than(days, trim_old=trim_old)
+    return {"status": "ok", "days": days, "trim_old": trim_old, "aggregated_groups": aggregated}
+
 # 12. API route – Stats
 # -------------------------------------------------------------
 @app.post("/api/stats")
@@ -1965,6 +2008,7 @@ async def startup_event() -> None:
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
     await close_all_sse_queues()
+    await flush_remaining_buffers()
     await app_state["session"].close()
     if token_worker_task is not None:
         token_worker_task.cancel()
