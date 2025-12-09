@@ -3,6 +3,7 @@
     <head>
         <meta charset="UTF-8" />
         <title>NOMYO Router Dashboard</title>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
         <style>
             body {
                 font-family: Arial, Helvetica, sans-serif;
@@ -81,7 +82,7 @@
                 margin-left: 0.5rem;
                 margin-right: 0.5rem;
                 min-width: 30%;
-                
+
                 font-size: 1rem;
                 transition: 0.3s;
             }
@@ -121,7 +122,8 @@
             }
             .copy-link,
             .delete-link,
-            .show-link {
+            .show-link,
+            .stats-link {
                 font-size: 0.9em;
                 margin-left: 0.5em;
                 cursor: pointer;
@@ -152,14 +154,14 @@
                 align-items: center;
                 justify-content: center;
             }
-            .modal-content {
-                background: #fff;
-                padding: 1rem;
-                max-width: 90%;
-                max-height: 90%;
-                overflow: auto;
-                border-radius: 6px;
-            }
+.modal-content {
+    background: #fff;
+    padding: 1rem;
+    width: 95%;
+    height: 95%;
+    overflow: auto;
+    border-radius: 6px;
+}
             .close-btn {
                 float: right;
                 cursor: pointer;
@@ -210,13 +212,65 @@
                     order: 1;
                 }
             }
+            /* ---------- Chart Timeframe Controls ---------- */
+            .timeframe-controls {
+                margin: 1rem 0;
+            }
+            .timeframe-controls button {
+                margin-right: 0.5rem;
+                padding: 0.25rem 0.5rem;
+                cursor: pointer;
+                background-color: #e0e0e0;
+                border: none;
+                border-radius: 4px;
+            }
+            .timeframe-controls button.active {
+                background-color: #0066cc;
+                color: white;
+            }
+            .chart-container {
+                position: relative;
+                height: 600px;
+                margin-top: 1rem;
+            }
+            .pie-chart-container {
+                position: relative;
+                height: 250px;
+                margin-top: 1rem;
+                max-width: 400px;
+            }
+            /* ---------- Stats Modal Layout ---------- */
+            .stats-content-wrapper {
+                display: flex;
+                flex-direction: row;
+                gap: 20px;
+            }
+            .main-stats-content {
+                flex: 1;
+            }
+            .endpoint-distribution-container {
+                flex: 0 0 auto;
+                width: 400px;
+                position: relative;
+            }
+            .endpoint-distribution-container h3 {
+                margin-top: 0;
+            }
+            .header-row {
+                display: flex;
+                align-items: center;   /* vertically center the button with the headline */
+                gap: 1rem;
+            }        
         </style>
     </head>
     <body>
         <a href="https://www.nomyo.ai" target="_blank"
             ><img src="./static/228394408.png" width="100px" height="100px"
         /></a>
-        <h1>Router Dashboard</h1>
+        <div class="header-row">
+            <h1>Router Dashboard</h1>
+            <button id="total-tokens-btn">Stats Total</button><span id="aggregation-status" class="loading" style="margin-left:8px;"></span>
+        </div>
 
         <button onclick="toggleDarkMode()" id="dark-mode-button">
             🌗
@@ -267,7 +321,7 @@
                             <th>Quant</th>
                             <th>Ctx</th>
                             <th>Digest</th>
-                            <th>Token</th> 
+                            <th>Token</th>
                         </tr>
                     </thead>
                     <tbody id="ps-body">
@@ -300,7 +354,159 @@
         </div>
 
         <script>
-            let psRows = new Map(); 
+            let psRows = new Map();
+
+ // Global placeholders for stats modal handling
+let statsModal = null;      // stats modal element
+let statsChart = null;      // Chart.js instance inside the modal
+let rawTimeSeries = null;   // raw time‑series data for the current model
+let totalTokensChart = null; // Chart.js instance for total tokens modal
+
+/* Integrated modal initialization and close handling into the main load block */
+
+// Assign the stats modal element and attach the close handler once the DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+    // Get the modal element (it now exists in the DOM)
+    statsModal = document.getElementById('stats-modal');
+
+    // Attach a single close handler (prevents multiple duplicate listeners)
+    if (statsModal) {
+        statsModal.addEventListener('click', (e) => {
+            if (e.target === statsModal || e.target.matches('.close-btn')) {
+                // Hide the modal
+                statsModal.style.display = 'none';
+
+                // Clean up the chart instance to avoid caching stale data
+                if (statsChart) {
+                    statsChart.destroy();
+                    statsChart = null;
+                }
+
+                // Remove the canvas element so a fresh one is created on next open
+                const oldCanvas = document.getElementById('time-series-chart');
+                if (oldCanvas) {
+                    oldCanvas.remove();
+                }
+
+                // Reset stored time‑series data to avoid reuse of stale data
+                rawTimeSeries = null;
+            }
+        });
+    }
+});
+
+/* ---------- Global renderTimeSeriesChart ---------- */
+function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
+  // Guard clause
+  if (!Array.isArray(timeSeriesData) || !timeSeriesData.length) {
+    chart.data.labels = [];
+    chart.data.datasets[0].data = [];
+    chart.data.datasets[1].data = [];
+    chart.update();
+    return;
+  }
+
+  /* ── 1️⃣  Determine bucket interval based on timeframe ──────────────────── */
+  let intervalMs;
+  let timeFormat;
+  
+  if (minutes <= 60) {
+    // 1 hour: 5-minute buckets
+    intervalMs = 5 * 60 * 1000;
+    timeFormat = { hour: '2-digit', minute: '2-digit' };
+  } else if (minutes <= 1440) {
+    // 1 day: 1-hour buckets
+    intervalMs = 60 * 60 * 1000;
+    timeFormat = { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' };
+  } else if (minutes <= 10080) {
+    // 7 days: 6-hour buckets
+    intervalMs = 6 * 60 * 60 * 1000;
+    timeFormat = { month: 'short', day: 'numeric', hour: '2-digit' };
+  } else {
+    // 30 days: 1-day buckets
+    intervalMs = 24 * 60 * 60 * 1000;
+    timeFormat = { month: 'short', day: 'numeric' };
+  }
+
+  /* ── 2️⃣  Get current time in local timezone ──────────────────────────── */
+  const now = new Date();
+  const nowMs = now.getTime();
+  const cutoffMs = nowMs - minutes * 60 * 1000;
+
+  /* ── 3️⃣  Build ordered bucket slots aligned to local time boundaries ───── */
+  const slots = [];
+  
+  // Round cutoff down to nearest bucket interval in local time
+  const cutoffDate = new Date(cutoffMs);
+  let startDate = new Date(cutoffDate);
+  
+  if (minutes <= 60) {
+    // Align to 5-minute boundaries
+    startDate.setMinutes(Math.floor(startDate.getMinutes() / 5) * 5, 0, 0);
+  } else if (minutes <= 1440) {
+    // Align to hour boundaries
+    startDate.setMinutes(0, 0, 0);
+  } else if (minutes <= 10080) {
+    // Align to 6-hour boundaries (00:00, 06:00, 12:00, 18:00)
+    startDate.setHours(Math.floor(startDate.getHours() / 6) * 6, 0, 0, 0);
+  } else {
+    // Align to day boundaries
+    startDate.setHours(0, 0, 0, 0);
+  }
+  
+  let slotTime = startDate.getTime();
+  while (slotTime <= nowMs) {
+    slots.push(slotTime);
+    slotTime += intervalMs;
+  }
+
+  /* ── 4️⃣  Aggregate raw rows into local time buckets ───────────────────── */
+  const bucketMap = {};
+  
+  timeSeriesData.forEach(row => {
+    // Database stores UTC timestamps in seconds, convert to local time milliseconds
+    const utcTimestampMs = row.timestamp * 1000;
+    
+    // Check if within our time window
+    if (utcTimestampMs < cutoffMs || utcTimestampMs > nowMs) return;
+    
+    // Find which bucket this timestamp belongs to
+    let closestSlot = null;
+    let minDiff = Infinity;
+    
+    for (const slot of slots) {
+      const diff = Math.abs(utcTimestampMs - slot);
+      if (diff < minDiff && diff < intervalMs) {
+        minDiff = diff;
+        closestSlot = slot;
+      }
+    }
+    
+    if (closestSlot !== null) {
+      if (!bucketMap[closestSlot]) bucketMap[closestSlot] = { input: 0, output: 0 };
+      bucketMap[closestSlot].input  += row.input_tokens  || 0;
+      bucketMap[closestSlot].output += row.output_tokens || 0;
+    }
+  });
+
+  /* ── 5️⃣  Build labels in local timezone ───────────────────────────────── */
+  const labels = slots.map(ts => {
+    const d = new Date(ts);
+    return d.toLocaleString(undefined, {
+      ...timeFormat,
+      timeZoneName: 'short'
+    });
+  });
+
+  const inputData  = slots.map(ts => (bucketMap[ts]?.input  ?? 0));
+  const outputData = slots.map(ts => (bucketMap[ts]?.output ?? 0));
+
+  /* ── 6️⃣  Push into the Chart.js instance ─────────────────────────────── */
+  chart.data.labels = labels;
+  chart.data.datasets[0].data = inputData;
+  chart.data.datasets[1].data = outputData;
+  chart.update();
+}
             /* ---------- Utility ---------- */
             async function fetchJSON(url) {
                 const resp = await fetch(url);
@@ -403,25 +609,26 @@
                                 e.preventDefault();
                                 const model = link.dataset.model;
                                 const ok = confirm(
-                                    `Delete the model “${model}”? This cannot be undone.`,
+                                    `Delete the model "${model}"? This cannot be undone.`,
                                 );
-                                if (!ok) return;
-                                try {
-                                    const resp = await fetch(
-                                        `/api/delete?model=${encodeURIComponent(model)}`,
-                                        { method: "DELETE" },
-                                    );
-                                    if (!resp.ok)
-                                        throw new Error(
-                                            `Delete failed: ${resp.status}`,
+                                if (ok) {
+                                    try {
+                                        const resp = await fetch(
+                                            `/api/delete?model=${encodeURIComponent(model)}`,
+                                            { method: "DELETE" },
                                         );
-                                    alert(
-                                        `Model “${model}” deleted successfully.`,
-                                    );
-                                    loadTags();
-                                } catch (err) {
-                                    console.error(err);
-                                    alert(`Error deleting ${model}: ${err}`);
+                                        if (!resp.ok)
+                                            throw new Error(
+                                                `Delete failed: ${resp.status}`,
+                                            );
+                                        alert(
+                                            `Model "${model}" deleted successfully.`,
+                                        );
+                                        loadTags();
+                                    } catch (err) {
+                                        console.error(err);
+                                        alert(`Error deleting ${model}: ${err}`);
+                                    }
                                 }
                             });
                         });
@@ -442,18 +649,22 @@
                             const tokenValue = existingRow
                                 ? existingRow.querySelector(".token-usage")?.textContent ?? 0
                                 : 0;
+                            const digest = m.digest || "";
+                            const shortDigest = digest.length > 24
+                                ? `${digest.slice(0, 12)}...${digest.slice(-12)}`
+                                : digest;
                             return `<tr data-model="${m.name}">
-                                <td class="model">${m.name}</td>
+                                <td class="model">${m.name} <a href="#" class="stats-link" data-model="${m.name}">stats</a></td>
                                 <td>${m.details.parameter_size}</td>
                                 <td>${m.details.quantization_level}</td>
                                 <td>${m.context_length}</td>
-                                <td>${m.digest}</td>
+                                <td>${shortDigest}</td>
                                 <td class="token-usage">${tokenValue}</td>
                             </tr>`;
                         })
                         .join("");
-                        psRows.clear();
-                        document
+                    psRows.clear();
+                    document
                         .querySelectorAll("#ps-body tr[data-model]")
                         .forEach((row) => {
                             const model = row.dataset.model;
@@ -470,9 +681,9 @@
                 return `hsl(${h}, 80%, 30%)`;
             }
             function hashString(str) {
-                let hash = 0;
+                let hash = 42;
                 for (let i = 0; i < str.length; i++) {
-                    hash = (hash << 5) - hash + str.charCodeAt(i);
+                    hash = ((hash << 5) + hash) + str.charCodeAt(i);
                     hash |= 0;
                 }
                 return Math.abs(hash);
@@ -481,9 +692,7 @@
                 // Create the EventSource once and keep it around
                 const source = new EventSource("/api/usage-stream");
 
-                // -----------------------------------------------------------------
                 // Helper that receives the payload and renders the chart
-                // -----------------------------------------------------------------
                 const renderChart = (data) => {
                     const chart = document.getElementById("usage-chart");
                     const usage = data.usage_counts || {};
@@ -514,9 +723,7 @@
                     chart.innerHTML = html;
                 };
 
-                // -----------------------------------------------------------------
                 // Event handlers
-                // -----------------------------------------------------------------
                 source.onmessage = (e) => {
                     try {
                         const payload = JSON.parse(e.data); // SSE sends plain text
@@ -525,18 +732,9 @@
                         const tokens  = payload.token_usage_counts || {};
 
                         psRows.forEach((row, model) => {
-                            /* regular usage count – optional if you want to keep it */
-                            let total = 0;
-                            for (const ep in usage) {
-                            total += usage[ep][model] || 0;
-                            }
-                            const usageCell = row.querySelector(".usage");
-                            if (usageCell) usageCell.textContent = total;
-
-                            /* token usage */
                             let tokenTotal = 0;
                             for (const ep in tokens) {
-                            tokenTotal += tokens[ep][model] || 0;
+                                tokenTotal += tokens[ep][model] || 0;
                             }
                             const tokenCell = row.querySelector(".token-usage");
                             if (tokenCell) tokenCell.textContent = tokenTotal;
@@ -548,7 +746,6 @@
 
                 source.onerror = (err) => {
                     console.error("SSE connection error. Retrying...", err);
-                    // EventSource will automatically try to reconnect.
                 };
                 window.addEventListener("beforeunload", () => source.close());
             }
@@ -561,7 +758,7 @@
                 loadUsage();
                 setInterval(loadPS, 60_000);
                 setInterval(loadEndpoints, 300_000);
-                
+
                 /* show logic */
                 document.body.addEventListener("click", async (e) => {
                     if (!e.target.matches(".show-link")) return;
@@ -632,8 +829,295 @@
                         modal.style.display = "none";
                     }
                 });
+
+                /* stats logic */
+                document.body.addEventListener("click", async (e) => {
+                    if (!e.target.matches(".stats-link")) return;
+                    e.preventDefault();
+                    const model = e.target.dataset.model;
+                    try {
+                        const resp = await fetch(
+                            `/api/stats?model=${encodeURIComponent(model)}`,
+                            { method: "POST" },
+                        );
+                        if (!resp.ok)
+                            throw new Error(`Status ${resp.status}`);
+                        const data = await resp.json();
+                        const content = document.getElementById("stats-content");
+                        content.innerHTML = `
+                            <div class="stats-content-wrapper">
+                                <div class="main-stats-content">
+                                    <h3>Token Usage</h3>
+                                    <p>Input tokens: ${data.input_tokens}</p>
+                                    <p>Output tokens: ${data.output_tokens}</p>
+                                    <p>Total tokens: ${data.total_tokens}</p>
+                                    <h3>Usage Over Time</h3>
+                                    <div class="timeframe-controls">
+                                        <button class="timeframe-btn active" data-minutes="60">Last 1 hour</button>
+                                        <button class="timeframe-btn" data-minutes="1440">Last 1 day</button>
+                                        <button class="timeframe-btn" data-minutes="10080">Last 7 days</button>
+                                        <button class="timeframe-btn" data-minutes="43200">Last 30 days</button>
+                                    </div>
+                                    <div class="chart-container">
+                                        <canvas id="time-series-chart"></canvas>
+                                    </div>
+                                </div>
+                                <div class="endpoint-distribution-container">
+                                    <h3>Endpoint Distribution</h3>
+                                    <div class="pie-chart-container">
+                                        <canvas id="endpoint-pie-chart"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                        document.getElementById("stats-modal").style.display = "flex";
+
+                        // Initialise the charts (time-series + pie chart)
+                        initStatsChart(data.time_series, data.endpoint_distribution);
+                    } catch (err) {
+                        console.error(err);
+                        alert(`Could not load model stats: ${err.message}`);
+                    }
+                });
+
+/* ---------- Helper to initialise or refresh the stats chart ---------- */
+function initStatsChart(timeSeriesData, endpointDistribution) {
+    // Destroy any existing chart instance
+    if (statsChart) {
+        statsChart.destroy();
+        statsChart = null;
+    }
+
+    // Remove any existing canvas and create a fresh one
+    const oldCanvas = document.getElementById('time-series-chart');
+    if (oldCanvas) {
+        oldCanvas.remove();
+    }
+    const canvas = document.createElement('canvas');
+    canvas.id = 'time-series-chart';
+    document.querySelector('.chart-container').appendChild(canvas);
+
+    // Create a new Chart.js instance
+    const ctx = canvas.getContext('2d');
+    const chart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: [],
+            datasets: [
+                { label: 'Input Tokens', data: [], backgroundColor: '#4CAF50' },
+                { label: 'Output Tokens', data: [], backgroundColor: '#2196F3' }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: { stacked: true },
+                y: { stacked: true }
+            },
+            plugins: {
+                legend: { position: 'top' },
+                title: { display: true, text: 'Token Usage Over Time' }
+            }
+        }
+    });
+
+    // Store the chart globally for later updates
+    statsChart = chart;
+
+    // Store the raw time‑series data globally
+    rawTimeSeries = timeSeriesData || [];
+
+    // Render the initial view (default to 60 minutes)
+    renderTimeSeriesChart(rawTimeSeries, statsChart, 60);
+
+    // Attach timeframe button handlers (once)
+    document.querySelectorAll('.timeframe-btn').forEach(button => {
+        button.addEventListener('click', function () {
+            // Update active button styling
+            document.querySelectorAll('.timeframe-btn').forEach(btn => btn.classList.remove('active'));
+            this.classList.add('active');
+
+            // Re‑render chart with the selected timeframe
+            const minutes = parseInt(this.dataset.minutes);
+            renderTimeSeriesChart(rawTimeSeries, statsChart, minutes);
+        });
+    });
+
+    // Create endpoint distribution pie chart
+    if (endpointDistribution && Object.keys(endpointDistribution).length > 0) {
+        const pieCanvas = document.getElementById('endpoint-pie-chart');
+        const pieCtx = pieCanvas.getContext('2d');
+        
+        const endpoints = Object.keys(endpointDistribution);
+        const tokenCounts = Object.values(endpointDistribution);
+        const colors = endpoints.map(ep => getColor(ep));
+        
+        new Chart(pieCtx, {
+            type: 'pie',
+            data: {
+                labels: endpoints,
+                datasets: [{
+                    data: tokenCounts,
+                    backgroundColor: colors,
+                    borderWidth: 1,
+                    borderColor: '#fff'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'right',
+                        labels: {
+                            boxWidth: 12,
+                            font: { size: 11 }
+                        }
+                    },
+                    title: {
+                        display: true,
+                        text: 'Total Tokens per Endpoint'
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const label = context.label || '';
+                                const value = context.parsed || 0;
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const percentage = ((value / total) * 100).toFixed(1);
+                                return `${label}: ${value.toLocaleString()} tokens (${percentage}%)`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+}
             });
         </script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const totalBtn = document.getElementById('total-tokens-btn');
+    if (totalBtn) {
+        totalBtn.addEventListener('click', async () => {
+            try {
+                const resp = await fetch('/api/token_counts');
+                const data = await resp.json();
+                const modal = document.getElementById('total-tokens-modal');
+                const numberEl = document.getElementById('total-tokens-number');
+                numberEl.textContent = data.total_tokens;
+                document.getElementById('aggregation-status').textContent = 'Aggregating...';
+                try {
+                    const aggResp = await fetch('/api/aggregate_time_series_days', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ days: 30 , trim_old: true})
+                    });
+                    if (aggResp.ok) {
+                        const aggData = await aggResp.json();
+                        const aggr = aggData.aggregated_groups ?? 0;
+                        document.getElementById('aggregation-status').textContent = `Aggregated ${aggr} groups`;
+                    } else {
+                        document.getElementById('aggregation-status').textContent = 'Aggregation failed';
+                    }
+                } catch (err) {
+                    document.getElementById('aggregation-status').textContent = 'Aggregation error';
+                }
+                const chartCanvas = document.getElementById('total-tokens-chart');
+                if (chartCanvas) {
+                    // Destroy existing chart if it exists
+                    if (totalTokensChart) {
+                        totalTokensChart.destroy();
+                        totalTokensChart = null;
+                    }
+                    
+                    const ctx = chartCanvas.getContext('2d');
+                    const tokenCounts = data.breakdown || [];
+                    /* NEW LOGIC: concentric rings per model */
+                    const modelTotals = {};
+                    const modelEndpointTotals = {};
+                    tokenCounts.forEach(entry => {
+                        const { model, endpoint, total_tokens } = entry;
+                        modelTotals[model] = (modelTotals[model] || 0) + total_tokens;
+                        if (!modelEndpointTotals[model]) modelEndpointTotals[model] = {};
+                        modelEndpointTotals[model][endpoint] = (modelEndpointTotals[model][endpoint] || 0) + total_tokens;
+                    });
+                    const endpointsSet = new Set();
+                    tokenCounts.forEach(entry => endpointsSet.add(entry.endpoint));
+                    const endpoints = Array.from(endpointsSet);
+                    const endpointColors = {};
+                    endpoints.forEach(ep => {
+                        endpointColors[ep] = getColor(ep);
+                    });
+                    const sortedModels = Object.keys(modelTotals).sort((a, b) => modelTotals[b] - modelTotals[a]);
+                    const datasets = sortedModels.map(model => {
+                        const data = endpoints.map(ep => (modelEndpointTotals[model][ep] || 0));
+                        const backgroundColor = endpoints.map(ep => endpointColors[ep]);
+                        return {
+                            label: model,
+                            data,
+                            backgroundColor,
+                            borderWidth: 1,
+                            borderColor: '#fff'
+                        };
+                    });
+                    totalTokensChart = new Chart(ctx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: endpoints,
+                            datasets
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            cutout: '15%',
+                            plugins: {
+                                legend: {
+                                    position: 'right',
+                                    labels: {
+                                        boxWidth: 12,
+                                        font: { size: 11 }
+                                    }
+                                },
+                                title: {
+                                    display: true,
+                                    text: 'Token Distribution by Model per Endpoint'
+                                },
+                                tooltip: {
+                                    callbacks: {
+                                        label: function(context) {
+                                            const endpointName = context.chart.data.labels[context.dataIndex];
+                                            const modelName = context.dataset.label;
+                                            const value = context.parsed || 0;
+                                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                            const percentage = ((value / total) * 100).toFixed(1);
+                                            return `${modelName} - ${endpointName}: ${value.toLocaleString()} tokens (${percentage}%)`;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+                modal.style.display = 'flex';
+            } catch (err) {
+                console.error(err);
+                alert('Failed to load token counts');
+            }
+        });
+    }
+    const totalTokensModal = document.getElementById('total-tokens-modal');
+    if (totalTokensModal) {
+        totalTokensModal.addEventListener('click', (e) => {
+            if (e.target === totalTokensModal || e.target.matches('.close-btn')) {
+                totalTokensModal.style.display = 'none';
+            }
+        });
+    }
+});
+</script>
 
         <div id="show-modal" class="modal">
             <div class="modal-content">
@@ -642,5 +1126,22 @@
                 <pre id="json-output"></pre>
             </div>
         </div>
-    </body>
+
+        <div id="stats-modal" class="modal">
+            <div class="modal-content">
+                <span class="close-btn">&times;</span>
+                <h2>Model Stats</h2>
+                <div id="stats-content">
+                    <p>Loading stats...</p>
+                </div>
+            </div>
+        </div>
+    <div id="total-tokens-modal" class="modal">
+  <div class="modal-content">
+    <span class="close-btn">&times;</span>
+    <h2>Total Tokens</h2>
+    <p id="total-tokens-number"></p>
+    <canvas id="total-tokens-chart"></canvas>
+  </div>
+</div>
 </html>

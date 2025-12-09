@@ -2,11 +2,12 @@
 title: NOMYO Router - an Ollama Proxy with Endpoint:Model aware routing
 author: alpha-nerd-nomyo
 author_url: https://github.com/nomyo-ai
-version: 0.4
+version: 0.5
 license: AGPL
 """
 # -------------------------------------------------------------
-import orjson, time, asyncio, yaml, ollama, openai, os, re, aiohttp, ssl, datetime, random, base64, io
+import orjson, time, asyncio, yaml, ollama, openai, os, re, aiohttp, ssl, random, base64, io
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Set, List, Optional
 from urllib.parse import urlparse
@@ -45,6 +46,18 @@ app_state = {
     "connector": None,
 }
 token_worker_task: asyncio.Task | None = None
+flush_task: asyncio.Task | None = None
+
+# ------------------------------------------------------------------
+# Token Count Buffer (for write-behind pattern)
+# ------------------------------------------------------------------
+# Structure: {endpoint: {model: (input_tokens, output_tokens)}}
+token_buffer: dict[str, dict[str, tuple[int, int]]] = defaultdict(lambda: defaultdict(lambda: (0, 0)))
+# Time series buffer with timestamp
+time_series_buffer: list[dict[str, int | str]] = []
+
+# Configuration for periodic flushing
+FLUSH_INTERVAL = 10  # seconds
 
 # -------------------------------------------------------------
 # 1. Configuration loader
@@ -60,6 +73,9 @@ class Config(BaseSettings):
     max_concurrent_connections: int = 1
 
     api_keys: Dict[str, str] = Field(default_factory=dict)
+
+    # Database configuration
+    db_path: str = Field(default=os.getenv("NOMYO_ROUTER_DB_PATH", "token_counts.db"))
 
     class Config:
         # Load from `config.yaml` first, then from env variables
@@ -101,6 +117,8 @@ def _config_path_from_env() -> Path:
         return Path(candidate).expanduser()
     return Path("config.yaml")
 
+from db import TokenDatabase
+
 
 # Create the global config object – it will be overwritten on startup
 config = Config.from_yaml(_config_path_from_env())
@@ -129,6 +147,9 @@ usage_counts: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
 token_usage_counts: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
 usage_lock = asyncio.Lock()  # protects access to usage_counts
 token_usage_lock = asyncio.Lock()
+
+# Database instance
+db: "TokenDatabase" = None
 
 # -------------------------------------------------------------
 # 4. Helperfunctions 
@@ -181,7 +202,7 @@ def _format_connection_issue(url: str, error: Exception) -> str:
         )
 
     return f"Error while contacting {url}: {error}"
-    
+
 def is_ext_openai_endpoint(endpoint: str) -> bool:
     if "/v1" not in endpoint:
         return False
@@ -199,9 +220,66 @@ def is_ext_openai_endpoint(endpoint: str) -> bool:
 async def token_worker() -> None:
     while True:
         endpoint, model, prompt, comp = await token_queue.get()
+        # Accumulate counts in memory buffer
+        token_buffer[endpoint][model] = (
+            token_buffer[endpoint].get(model, (0, 0))[0] + prompt,
+            token_buffer[endpoint].get(model, (0, 0))[1] + comp
+        )
+
+        # Add to time series buffer with timestamp (UTC)
+        now = datetime.now(tz=timezone.utc)
+        timestamp = int(datetime(now.year, now.month, now.day, now.hour, now.minute, tzinfo=timezone.utc).timestamp())
+        time_series_buffer.append({
+            'endpoint': endpoint,
+            'model': model,
+            'input_tokens': prompt,
+            'output_tokens': comp,
+            'total_tokens': prompt + comp,
+            'timestamp': timestamp
+        })
+
+        # Update in-memory counts for immediate reporting
         async with token_usage_lock:
             token_usage_counts[endpoint][model] += (prompt + comp)
-        await publish_snapshot()
+            await publish_snapshot()
+
+async def flush_buffer() -> None:
+    """Periodically flush accumulated token counts to the database."""
+    while True:
+        await asyncio.sleep(FLUSH_INTERVAL)
+
+        # Flush token counts
+        if token_buffer:
+            await db.update_batched_counts(token_buffer)
+            token_buffer.clear()
+
+        # Flush time series entries
+        if time_series_buffer:
+            await db.add_batched_time_series(time_series_buffer)
+            time_series_buffer.clear()
+
+async def flush_remaining_buffers() -> None:
+    """
+    Flush any in-memory buffers to the database on shutdown.
+    This is designed to be safely invoked during shutdown and should not raise.
+    """
+    try:
+        flushed_entries = 0
+        if token_buffer:
+            await db.update_batched_counts(token_buffer)
+            flushed_entries += sum(len(v) for v in token_buffer.values())
+            token_buffer.clear()
+        if time_series_buffer:
+            await db.add_batched_time_series(time_series_buffer)
+            flushed_entries += len(time_series_buffer)
+            time_series_buffer.clear()
+        if flushed_entries:
+            print(f"[shutdown] Flushed {flushed_entries} in-memory entries to DB on shutdown.")
+        else:
+            print("[shutdown] No in-memory entries to flush on shutdown.")
+    except Exception as e:
+        # Do not raise during shutdown – log and continue teardown
+        print(f"[shutdown] Error flushing remaining buffers: {e}")
 
 class fetch:
     async def available_models(endpoint: str, api_key: Optional[str] = None) -> Set[str]:
@@ -366,7 +444,7 @@ async def decrement_usage(endpoint: str, model: str) -> None:
 def iso8601_ns():
     ns = time.time_ns()
     sec, ns_rem = divmod(ns, 1_000_000_000)
-    dt = datetime.datetime.fromtimestamp(sec, tz=datetime.timezone.utc)
+    dt = datetime.fromtimestamp(sec, tz=timezone.utc)
     return (
         f"{dt.year:04d}-{dt.month:02d}-{dt.day:02d}T"
         f"{dt.hour:02d}:{dt.minute:02d}:{dt.second:02d}."
@@ -628,7 +706,6 @@ async def choose_endpoint(model: str) -> str:
                 f"None of the configured endpoints ({', '.join(config.endpoints)}) "
                 f"advertise the model '{model}'."
             )
-
     # 3️⃣  Among the candidates, find those that have the model *loaded*
     #      (concurrently, but only for the filtered list)
     load_tasks = [fetch.loaded_models(ep) for ep in candidate_endpoints]
@@ -743,7 +820,8 @@ async def proxy(request: Request):
                         chunk = rechunk.openai_completion2ollama(chunk, stream, start_ts)
                     prompt_tok = chunk.prompt_eval_count or 0
                     comp_tok   = chunk.eval_count or 0
-                    await token_queue.put((endpoint, model, prompt_tok, comp_tok))
+                    if prompt_tok != 0 or comp_tok != 0:
+                        await token_queue.put((endpoint, model, prompt_tok, comp_tok))
                     if hasattr(chunk, "model_dump_json"):
                         json_line = chunk.model_dump_json()
                     else:
@@ -757,7 +835,8 @@ async def proxy(request: Request):
                     response = async_gen.model_dump_json()
                     prompt_tok = async_gen.prompt_eval_count or 0
                     comp_tok   = async_gen.eval_count or 0
-                    await token_queue.put((endpoint, model, prompt_tok, comp_tok))
+                    if prompt_tok != 0 or comp_tok != 0:
+                        await token_queue.put((endpoint, model, prompt_tok, comp_tok))
                 json_line = (
                     response
                     if hasattr(async_gen, "model_dump_json")
@@ -859,7 +938,8 @@ async def chat_proxy(request: Request):
                     # `chunk` can be a dict or a pydantic model – dump to JSON safely
                     prompt_tok = chunk.prompt_eval_count or 0
                     comp_tok   = chunk.eval_count or 0
-                    await token_queue.put((endpoint, model, prompt_tok, comp_tok))
+                    if prompt_tok != 0 or comp_tok != 0:
+                        await token_queue.put((endpoint, model, prompt_tok, comp_tok))
                     if hasattr(chunk, "model_dump_json"):
                         json_line = chunk.model_dump_json()
                     else:
@@ -873,7 +953,8 @@ async def chat_proxy(request: Request):
                     response = async_gen.model_dump_json()
                     prompt_tok = async_gen.prompt_eval_count or 0
                     comp_tok   = async_gen.eval_count or 0
-                    await token_queue.put((endpoint, model, prompt_tok, comp_tok))
+                    if prompt_tok != 0 or comp_tok != 0:
+                        await token_queue.put((endpoint, model, prompt_tok, comp_tok))
                 json_line = (
                     response
                     if hasattr(async_gen, "model_dump_json")
@@ -1086,7 +1167,7 @@ async def show_proxy(request: Request, model: Optional[str] = None):
         if not model:
             payload = orjson.loads(body_bytes.decode("utf-8"))
             model = payload.get("model")
-        
+
         if not model:
             raise HTTPException(
                 status_code=400, detail="Missing required field 'model'"
@@ -1104,6 +1185,97 @@ async def show_proxy(request: Request, model: Optional[str] = None):
 
     # 4. Return ShowResponse
     return show
+
+# -------------------------------------------------------------
+@app.get("/api/token_counts")
+async def token_counts_proxy():
+    breakdown = []
+    total = 0
+    async for entry in db.load_token_counts():
+        total += entry['total_tokens']
+        breakdown.append({
+            "endpoint": entry["endpoint"],
+            "model": entry["model"],
+            "input_tokens": entry["input_tokens"],
+            "output_tokens": entry["output_tokens"],
+            "total_tokens": entry["total_tokens"],
+        })
+    return {"total_tokens": total, "breakdown": breakdown}
+
+@app.post("/api/aggregate_time_series_days")
+async def aggregate_time_series_days_proxy(request: Request):
+    """
+    Aggregate time_series entries older than days into daily aggregates by endpoint/model/date.
+    """
+    try:
+        body_bytes = await request.body()
+        if not body_bytes:
+            days = 30
+            trim_old = False
+        else:
+            payload = orjson.loads(body_bytes.decode("utf-8"))
+            days = int(payload.get("days", 30))
+            trim_old = bool(payload.get("trim_old", False))
+    except Exception:
+        days = 30
+        trim_old = False
+    aggregated = await db.aggregate_time_series_older_than(days, trim_old=trim_old)
+    return {"status": "ok", "days": days, "trim_old": trim_old, "aggregated_groups": aggregated}
+
+# 12. API route – Stats
+# -------------------------------------------------------------
+@app.post("/api/stats")
+async def stats_proxy(request: Request, model: Optional[str] = None):
+    """
+    Return token usage statistics for a specific model.
+    """
+    try:
+        body_bytes = await request.body()
+
+        if not model:
+            payload = orjson.loads(body_bytes.decode("utf-8"))
+            model = payload.get("model")
+
+        if not model:
+            raise HTTPException(
+                status_code=400, detail="Missing required field 'model'"
+            )
+    except orjson.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}") from e
+
+    # Get token counts from database
+    token_data = await db.get_token_counts_for_model(model)
+
+    if not token_data:
+        raise HTTPException(
+            status_code=404, detail="No token data found for this model"
+        )
+
+    # Get time series data for the last 30 days (43200 minutes = 30 days)
+    # Assuming entries are grouped by minute, 30 days = 43200 entries max
+    time_series = []
+    endpoint_totals = defaultdict(int)  # Track tokens per endpoint
+    
+    async for entry in db.get_latest_time_series(limit=50000):
+        if entry['model'] == model:
+            time_series.append({
+                'endpoint': entry['endpoint'],
+                'timestamp': entry['timestamp'],
+                'input_tokens': entry['input_tokens'],
+                'output_tokens': entry['output_tokens'],
+                'total_tokens': entry['total_tokens']
+            })
+            # Accumulate total tokens per endpoint
+            endpoint_totals[entry['endpoint']] += entry['total_tokens']
+
+    return {
+        'model': model,
+        'input_tokens': token_data['input_tokens'],
+        'output_tokens': token_data['output_tokens'],
+        'total_tokens': token_data['total_tokens'],
+        'time_series': time_series,
+        'endpoint_distribution': dict(endpoint_totals)
+    }
 
 # -------------------------------------------------------------
 # 12. API route – Copy
@@ -1482,7 +1654,7 @@ async def openai_chat_completions_proxy(request: Request):
         optional_params = {
             "tools": tools,
             "response_format": response_format,
-            "stream_options": stream_options,
+            "stream_options": stream_options or {"include_usage": True },
             "max_completion_tokens": max_completion_tokens,
             "max_tokens": max_tokens,
             "temperature": temperature,
@@ -1524,13 +1696,23 @@ async def openai_chat_completions_proxy(request: Request):
                         if hasattr(chunk, "model_dump_json")
                         else orjson.dumps(chunk)
                     )
-                    if chunk.choices[0].delta.content is not None:
-                        yield f"data: {data}\n\n".encode("utf-8")
+                    if chunk.choices:
+                        if chunk.choices[0].delta.content is not None:
+                            yield f"data: {data}\n\n".encode("utf-8")
+                    if chunk.usage is not None:
+                        prompt_tok = chunk.usage.prompt_tokens or 0
+                        comp_tok   = chunk.usage.completion_tokens or 0
+                        if prompt_tok != 0 or comp_tok != 0:
+                            if not is_ext_openai_endpoint(endpoint):
+                                    if not ":" in model:
+                                        local_model = model+":latest"
+                            await token_queue.put((endpoint, local_model, prompt_tok, comp_tok))
                 yield b"data: [DONE]\n\n"
             else:
                 prompt_tok = async_gen.usage.prompt_tokens or 0
                 comp_tok   = async_gen.usage.completion_tokens or 0
-                await token_queue.put((endpoint, model, prompt_tok, comp_tok))
+                if prompt_tok != 0 or comp_tok != 0:
+                    await token_queue.put((endpoint, model, prompt_tok, comp_tok))
                 json_line = (
                     async_gen.model_dump_json()
                     if hasattr(async_gen, "model_dump_json")
@@ -1591,7 +1773,7 @@ async def openai_completions_proxy(request: Request):
             "seed": seed,
             "stop": stop,
             "stream": stream,
-            "stream_options": stream_options,
+            "stream_options": stream_options or {"include_usage": True },
             "temperature": temperature,
             "top_p": top_p,
             "max_tokens": max_tokens,
@@ -1619,7 +1801,7 @@ async def openai_completions_proxy(request: Request):
     oclient = openai.AsyncOpenAI(base_url=base_url, default_headers=default_headers, api_key=config.api_keys[endpoint])
 
     # 3. Async generator that streams completions data and decrements the counter
-    async def stream_ocompletions_response():
+    async def stream_ocompletions_response(model=model):
         try:
             # The chat method returns a generator of dicts (or GenerateResponse)
             async_gen = await oclient.completions.create(**params)
@@ -1630,13 +1812,24 @@ async def openai_completions_proxy(request: Request):
                         if hasattr(chunk, "model_dump_json")
                         else orjson.dumps(chunk)
                     )
-                    yield f"data: {data}\n\n".encode("utf-8")
+                    if chunk.choices:
+                        if chunk.choices[0].finish_reason == None:
+                            yield f"data: {data}\n\n".encode("utf-8")
+                    if chunk.usage is not None:
+                            prompt_tok = chunk.usage.prompt_tokens or 0
+                            comp_tok   = chunk.usage.completion_tokens or 0
+                            if prompt_tok != 0 or comp_tok != 0:
+                                if not is_ext_openai_endpoint(endpoint):
+                                    if not ":" in model:
+                                        local_model = model+":latest"
+                                await token_queue.put((endpoint, local_model, prompt_tok, comp_tok))
                 # Final DONE event
                 yield b"data: [DONE]\n\n"
             else:
                 prompt_tok = async_gen.usage.prompt_tokens or 0
                 comp_tok   = async_gen.usage.completion_tokens or 0
-                await token_queue.put((endpoint, model, prompt_tok, comp_tok))
+                if prompt_tok != 0 or comp_tok != 0:
+                    await token_queue.put((endpoint, model, prompt_tok, comp_tok))
                 json_line = (
                     async_gen.model_dump_json()
                     if hasattr(async_gen, "model_dump_json")
@@ -1772,7 +1965,7 @@ async def usage_stream(request: Request):
 # -------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event() -> None:
-    global config
+    global config, db
     # Load YAML config (or use defaults if not present)
     config_path = _config_path_from_env()
     config = Config.from_yaml(config_path)
@@ -1787,7 +1980,21 @@ async def startup_event() -> None:
             f"No configuration file found at {config_path}. "
             "Falling back to default settings."
         )
-    
+
+    # Initialize database
+    db = TokenDatabase(config.db_path)
+    await db.init_db()
+
+    # Load existing token counts from database
+    async for count_entry in db.load_token_counts():
+        endpoint = count_entry['endpoint']
+        model = count_entry['model']
+        input_tokens = count_entry['input_tokens']
+        output_tokens = count_entry['output_tokens']
+        total_tokens = count_entry['total_tokens']
+
+        token_usage_counts[endpoint][model] = total_tokens
+
     ssl_context = ssl.create_default_context()
     connector = aiohttp.TCPConnector(limit=0, limit_per_host=512, ssl=ssl_context)
     timeout = aiohttp.ClientTimeout(total=60, connect=15, sock_read=120, sock_connect=15)
@@ -1796,10 +2003,14 @@ async def startup_event() -> None:
     app_state["connector"] = connector
     app_state["session"] = session
     token_worker_task = asyncio.create_task(token_worker())
+    flush_task = asyncio.create_task(flush_buffer())
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
     await close_all_sse_queues()
+    await flush_remaining_buffers()
     await app_state["session"].close()
     if token_worker_task is not None:
         token_worker_task.cancel()
+    if flush_task is not None:
+        flush_task.cancel()

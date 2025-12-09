@@ -62,3 +62,6 @@ cython_debug/
 
 # Config
 config.yaml
+
+# SQLite
+*.db*
