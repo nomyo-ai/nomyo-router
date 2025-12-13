@@ -1,5 +1,4 @@
-import aiosqlite
-import asyncio
+import aiosqlite, asyncio
 from typing import Optional
 from pathlib import Path
 from datetime import datetime, timezone
@@ -182,22 +181,24 @@ class TokenDatabase:
         """Get token counts for a specific model, aggregated across all endpoints."""
         db = await self._get_connection()
         async with self._operation_lock:
-            async with db.execute('SELECT endpoint, model, input_tokens, output_tokens, total_tokens FROM token_counts WHERE model = ?', (model,)) as cursor:
-                total_input = 0
-                total_output = 0
-                total_tokens = 0
-                async for row in cursor:
-                    total_input += row[2]
-                    total_output += row[3]
-                    total_tokens += row[4]
-                
-                if total_input > 0 or total_output > 0:
+            async with db.execute('''
+                SELECT
+                    'aggregated' as endpoint,
+                    ? as model,
+                    SUM(input_tokens) as input_tokens,
+                    SUM(output_tokens) as output_tokens,
+                    SUM(total_tokens) as total_tokens
+                FROM token_counts
+                WHERE model = ?
+            ''', (model, model)) as cursor:
+                row = await cursor.fetchone()
+                if row is not None:
                     return {
-                        'endpoint': 'aggregated',
-                        'model': model,
-                        'input_tokens': total_input,
-                        'output_tokens': total_output,
-                        'total_tokens': total_tokens
+                        'endpoint': row[0],
+                        'model': row[1],
+                        'input_tokens': row[2],
+                        'output_tokens': row[3],
+                        'total_tokens': row[4]
                     }
         return None
 
