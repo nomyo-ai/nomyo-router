@@ -687,7 +687,7 @@ async def choose_endpoint(model: str) -> str:
         if model in models
     ]
     
-    # 6️⃣ 
+    # 6️⃣
     if not candidate_endpoints:
         if ":latest" in model:  #ollama naming convention not applicable to openai
             model_without_latest = model.split(":latest")[0]
@@ -696,7 +696,9 @@ async def choose_endpoint(model: str) -> str:
                 if model_without_latest in models and is_ext_openai_endpoint(ep)
             ]
         if not candidate_endpoints:
-            model = model + ":latest"
+            # Only add :latest suffix if model doesn't already have a version suffix
+            if ":" not in model:
+                model = model + ":latest"
             candidate_endpoints = [
                 ep for ep, models in zip(config.endpoints, advertised_sets)
                 if model in models
