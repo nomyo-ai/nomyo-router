@@ -17,7 +17,7 @@ def moe(query: str, query_id: int, response: str) -> str:
     """
     return moe_prompt
 
-def moe_select_candiadate(query: str, candidates_with_feedback: list[str]) -> str:
+def moe_select_candidate(query: str, candidates_with_feedback: list[str]) -> str:
     select_prompt = f"""
     From the following responses for the user query: {query}
     select the best fitting candidate and formulate a final anser for the user.
