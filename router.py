@@ -9,6 +9,9 @@ license: AGPL
 import orjson, time, asyncio, yaml, ollama, openai, os, re, aiohttp, ssl, random, base64, io, enhance
 from datetime import datetime, timezone
 from pathlib import Path
+
+# Directory containing static files (relative to this script)
+STATIC_DIR = Path(__file__).parent / "static"
 from typing import Dict, Set, List, Optional
 from urllib.parse import urlparse
 from fastapi import FastAPI, Request, HTTPException
@@ -55,6 +58,8 @@ flush_task: asyncio.Task | None = None
 token_buffer: dict[str, dict[str, tuple[int, int]]] = defaultdict(lambda: defaultdict(lambda: (0, 0)))
 # Time series buffer with timestamp
 time_series_buffer: list[dict[str, int | str]] = []
+# Lock to protect buffer access from race conditions
+buffer_lock = asyncio.Lock()
 
 # Configuration for periodic flushing
 FLUSH_INTERVAL = 10  # seconds
@@ -218,45 +223,112 @@ def is_ext_openai_endpoint(endpoint: str) -> bool:
     return True  # It's an external OpenAI endpoint
 
 async def token_worker() -> None:
-    while True:
-        endpoint, model, prompt, comp = await token_queue.get()
-        # Accumulate counts in memory buffer
-        token_buffer[endpoint][model] = (
-            token_buffer[endpoint].get(model, (0, 0))[0] + prompt,
-            token_buffer[endpoint].get(model, (0, 0))[1] + comp
-        )
+    try:
+        while True:
+            endpoint, model, prompt, comp = await token_queue.get()
+            # Accumulate counts in memory buffer (protected by lock)
+            async with buffer_lock:
+                token_buffer[endpoint][model] = (
+                    token_buffer[endpoint].get(model, (0, 0))[0] + prompt,
+                    token_buffer[endpoint].get(model, (0, 0))[1] + comp
+                )
 
-        # Add to time series buffer with timestamp (UTC)
-        now = datetime.now(tz=timezone.utc)
-        timestamp = int(datetime(now.year, now.month, now.day, now.hour, now.minute, tzinfo=timezone.utc).timestamp())
-        time_series_buffer.append({
-            'endpoint': endpoint,
-            'model': model,
-            'input_tokens': prompt,
-            'output_tokens': comp,
-            'total_tokens': prompt + comp,
-            'timestamp': timestamp
-        })
+                # Add to time series buffer with timestamp (UTC)
+                now = datetime.now(tz=timezone.utc)
+                timestamp = int(datetime(now.year, now.month, now.day, now.hour, now.minute, tzinfo=timezone.utc).timestamp())
+                time_series_buffer.append({
+                    'endpoint': endpoint,
+                    'model': model,
+                    'input_tokens': prompt,
+                    'output_tokens': comp,
+                    'total_tokens': prompt + comp,
+                    'timestamp': timestamp
+                })
 
-        # Update in-memory counts for immediate reporting
-        async with token_usage_lock:
-            token_usage_counts[endpoint][model] += (prompt + comp)
-            await publish_snapshot()
+            # Update in-memory counts for immediate reporting
+            async with token_usage_lock:
+                token_usage_counts[endpoint][model] += (prompt + comp)
+                await publish_snapshot()
+    except asyncio.CancelledError:
+        # Gracefully handle task cancellation during shutdown
+        print("[token_worker] Task cancelled, processing remaining queue items...")
+        # Process any remaining items in the queue before exiting
+        while not token_queue.empty():
+            try:
+                endpoint, model, prompt, comp = token_queue.get_nowait()
+                async with buffer_lock:
+                    token_buffer[endpoint][model] = (
+                        token_buffer[endpoint].get(model, (0, 0))[0] + prompt,
+                        token_buffer[endpoint].get(model, (0, 0))[1] + comp
+                    )
+                    now = datetime.now(tz=timezone.utc)
+                    timestamp = int(datetime(now.year, now.month, now.day, now.hour, now.minute, tzinfo=timezone.utc).timestamp())
+                    time_series_buffer.append({
+                        'endpoint': endpoint,
+                        'model': model,
+                        'input_tokens': prompt,
+                        'output_tokens': comp,
+                        'total_tokens': prompt + comp,
+                        'timestamp': timestamp
+                    })
+                async with token_usage_lock:
+                    token_usage_counts[endpoint][model] += (prompt + comp)
+                    await publish_snapshot()
+            except asyncio.QueueEmpty:
+                break
+        print("[token_worker] Task cancelled, remaining items processed.")
+        raise
 
 async def flush_buffer() -> None:
     """Periodically flush accumulated token counts to the database."""
-    while True:
-        await asyncio.sleep(FLUSH_INTERVAL)
+    try:
+        while True:
+            await asyncio.sleep(FLUSH_INTERVAL)
 
-        # Flush token counts
-        if token_buffer:
-            await db.update_batched_counts(token_buffer)
-            token_buffer.clear()
+            # Flush token counts and time series (protected by lock)
+            async with buffer_lock:
+                if token_buffer:
+                    # Copy buffer before releasing lock for DB operation
+                    buffer_copy = {ep: dict(models) for ep, models in token_buffer.items()}
+                    token_buffer.clear()
+                else:
+                    buffer_copy = None
 
-        # Flush time series entries
-        if time_series_buffer:
-            await db.add_batched_time_series(time_series_buffer)
-            time_series_buffer.clear()
+                if time_series_buffer:
+                    ts_copy = list(time_series_buffer)
+                    time_series_buffer.clear()
+                else:
+                    ts_copy = None
+
+            # Perform DB operations outside the lock to avoid blocking
+            if buffer_copy:
+                await db.update_batched_counts(buffer_copy)
+            if ts_copy:
+                await db.add_batched_time_series(ts_copy)
+    except asyncio.CancelledError:
+        # Gracefully handle task cancellation during shutdown
+        print("[flush_buffer] Task cancelled, flushing remaining buffers...")
+        # Flush any remaining data before exiting
+        try:
+            async with buffer_lock:
+                if token_buffer:
+                    buffer_copy = {ep: dict(models) for ep, models in token_buffer.items()}
+                    token_buffer.clear()
+                else:
+                    buffer_copy = None
+                if time_series_buffer:
+                    ts_copy = list(time_series_buffer)
+                    time_series_buffer.clear()
+                else:
+                    ts_copy = None
+            if buffer_copy:
+                await db.update_batched_counts(buffer_copy)
+            if ts_copy:
+                await db.add_batched_time_series(ts_copy)
+            print("[flush_buffer] Task cancelled, remaining buffers flushed.")
+        except Exception as e:
+            print(f"[flush_buffer] Error during shutdown flush: {e}")
+        raise
 
 async def flush_remaining_buffers() -> None:
     """
@@ -265,14 +337,24 @@ async def flush_remaining_buffers() -> None:
     """
     try:
         flushed_entries = 0
-        if token_buffer:
-            await db.update_batched_counts(token_buffer)
-            flushed_entries += sum(len(v) for v in token_buffer.values())
-            token_buffer.clear()
-        if time_series_buffer:
-            await db.add_batched_time_series(time_series_buffer)
-            flushed_entries += len(time_series_buffer)
-            time_series_buffer.clear()
+        async with buffer_lock:
+            if token_buffer:
+                buffer_copy = {ep: dict(models) for ep, models in token_buffer.items()}
+                flushed_entries += sum(len(v) for v in token_buffer.values())
+                token_buffer.clear()
+            else:
+                buffer_copy = None
+            if time_series_buffer:
+                ts_copy = list(time_series_buffer)
+                flushed_entries += len(time_series_buffer)
+                time_series_buffer.clear()
+            else:
+                ts_copy = None
+        # Perform DB operations outside the lock
+        if buffer_copy:
+            await db.update_batched_counts(buffer_copy)
+        if ts_copy:
+            await db.add_batched_time_series(ts_copy)
         if flushed_entries:
             print(f"[shutdown] Flushed {flushed_entries} in-memory entries to DB on shutdown.")
         else:
@@ -884,7 +966,9 @@ async def choose_endpoint(model: str) -> str:
         ]
 
         if endpoints_with_free_slot:
-            return random.choice(endpoints_with_free_slot)
+            #return random.choice(endpoints_with_free_slot)
+            endpoints_with_free_slot.sort(key=lambda ep: sum(usage_counts.get(ep, {}).values()))
+            return endpoints_with_free_slot[0]
 
         # 5️⃣ All candidate endpoints are saturated – pick one with lowest usages count (will queue)
         ep = min(candidate_endpoints, key=current_usage)
@@ -2053,7 +2137,13 @@ async def index(request: Request):
     Render the dynamic NOMYO Router dashboard listing the configured endpoints
     and the models details, availability & task status.
     """
-    return HTMLResponse(content=open("static/index.html", "r").read(), status_code=200)
+    index_path = STATIC_DIR / "index.html"
+    try:
+        return HTMLResponse(content=index_path.read_text(encoding="utf-8"), status_code=200)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Page not found")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # -------------------------------------------------------------
 # 26. Healthendpoint

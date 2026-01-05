@@ -1,0 +1,98 @@
+# Docker Compose example for NOMYO Router with multiple Ollama instances
+
+version: '3.8'
+
+services:
+  # NOMYO Router
+  nomyo-router:
+    image: nomyo-router:latest
+    build: .
+    ports:
+      - "12434:12434"
+    environment:
+      - CONFIG_PATH=/app/config/config.yaml
+      - NOMYO_ROUTER_DB_PATH=/app/token_counts.db
+    volumes:
+      - ./config:/app/config
+      - router-db:/app/token_counts.db
+    depends_on:
+      - ollama1
+      - ollama2
+      - ollama3
+    restart: unless-stopped
+    networks:
+      - nomyo-net
+
+  # Ollama Instance 1
+  ollama1:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama1-data:/root/.ollama
+    environment:
+      - OLLAMA_NUM_PARALLEL=4
+    restart: unless-stopped
+    networks:
+      - nomyo-net
+
+  # Ollama Instance 2
+  ollama2:
+    image: ollama/ollama:latest
+    ports:
+      - "11435:11434"
+    volumes:
+      - ollama2-data:/root/.ollama
+    environment:
+      - OLLAMA_NUM_PARALLEL=4
+    restart: unless-stopped
+    networks:
+      - nomyo-net
+
+  # Ollama Instance 3
+  ollama3:
+    image: ollama/ollama:latest
+    ports:
+      - "11436:11434"
+    volumes:
+      - ollama3-data:/root/.ollama
+    environment:
+      - OLLAMA_NUM_PARALLEL=4
+    restart: unless-stopped
+    networks:
+      - nomyo-net
+
+  # Optional: Prometheus for monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+    restart: unless-stopped
+    networks:
+      - nomyo-net
+
+  # Optional: Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-storage:/var/lib/grafana
+    restart: unless-stopped
+    networks:
+      - nomyo-net
+
+volumes:
+  router-db:
+  ollama1-data:
+  ollama2-data:
+  ollama3-data:
+  grafana-storage:
+
+networks:
+  nomyo-net:
+    driver: bridge
