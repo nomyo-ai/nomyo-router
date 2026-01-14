@@ -217,6 +217,7 @@ data:
     endpoints:
       - http://ollama-service:11434
     max_concurrent_connections: 2
+    nomyo-router-api-key: ""
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -282,6 +283,9 @@ endpoints:
   - https://api.openai.com/v1
 
 max_concurrent_connections: 4
+
+# Optional router-level API key to secure the router and dashboard (leave blank to disable)
+nomyo-router-api-key: ""
 
 api_keys:
   "https://api.openai.com/v1": "${OPENAI_KEY}"

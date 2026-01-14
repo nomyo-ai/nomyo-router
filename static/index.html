@@ -11,6 +11,12 @@
                 color: #333;
                 padding: 20px;
             }
+            body.auth-locked {
+                background: #bfbfbf;
+            }
+            body.auth-locked > *:not(#api-key-modal) {
+                display: none !important;
+            }
             .dark-mode {
                 filter: invert(100%);
             }
@@ -167,6 +173,29 @@
                 cursor: pointer;
                 font-size: 1.5rem;
             }
+            #api-key-modal .modal-content {
+                width: 420px;
+                height: auto;
+                max-width: 90%;
+            }
+            #api-key-modal .modal-message {
+                margin: 0.5rem 0;
+            }
+            #api-key-modal input[type="password"] {
+                width: 100%;
+                padding: 0.6rem;
+                box-sizing: border-box;
+            }
+            #api-key-modal .modal-actions {
+                display: flex;
+                justify-content: flex-end;
+                gap: 0.5rem;
+                margin-top: 0.5rem;
+            }
+            #api-key-indicator {
+                font-size: 0.9rem;
+                color: #555;
+            }
             /* ---------- Usage Chart ---------- */
             .usage-chart {
                 margin-top: 20px;
@@ -269,7 +298,8 @@
         /></a>
         <div class="header-row">
             <h1>Router Dashboard</h1>
-            <button id="total-tokens-btn">Stats Total</button><span id="aggregation-status" class="loading" style="margin-left:8px;"></span>
+            <button id="total-tokens-btn">Stats Total</button>
+            <span id="aggregation-status" class="loading" style="margin-left:8px;"></span>
         </div>
 
         <button onclick="toggleDarkMode()" id="dark-mode-button">
@@ -353,14 +383,109 @@
             </table>
         </div>
 
-        <script>
+                <script>
             let psRows = new Map();
+            let statsModal = null;
+            let statsChart = null;
+            let rawTimeSeries = null;
+            let totalTokensChart = null;
+            let usageSource = null;
 
- // Global placeholders for stats modal handling
-let statsModal = null;      // stats modal element
-let statsChart = null;      // Chart.js instance inside the modal
-let rawTimeSeries = null;   // raw time‑series data for the current model
-let totalTokensChart = null; // Chart.js instance for total tokens modal
+            const API_KEY_STORAGE_KEY = "nomyo-router-api-key";
+            let apiKeyWaiters = [];
+
+            function getStoredApiKey() {
+                return localStorage.getItem(API_KEY_STORAGE_KEY) || "";
+            }
+
+            function setStoredApiKey(key) {
+                if (key) {
+                    localStorage.setItem(API_KEY_STORAGE_KEY, key);
+                } else {
+                    localStorage.removeItem(API_KEY_STORAGE_KEY);
+                }
+                updateApiKeyIndicator();
+            }
+
+            function updateApiKeyIndicator() {
+                const indicator = document.getElementById("api-key-indicator");
+                if (!indicator) return;
+                const hasKey = !!getStoredApiKey();
+                indicator.textContent = hasKey ? "API key set" : "API key not set";
+                indicator.style.color = hasKey ? "green" : "#b22222";
+            }
+
+            function buildAuthedUrl(url) {
+                const key = getStoredApiKey();
+                if (!key) return url;
+                try {
+                    const u = new URL(url, window.location.origin);
+                    if (!u.searchParams.has("api_key")) {
+                        u.searchParams.set("api_key", key);
+                    }
+                    return u.toString();
+                } catch (err) {
+                    return url;
+                }
+            }
+
+            function showApiKeyModal(reasonText) {
+                const overlay = document.getElementById("api-key-modal");
+                if (!overlay) return Promise.resolve();
+                document.body.classList.add("auth-locked");
+
+                const reason = document.getElementById("api-key-reason");
+                if (reason) {
+                    reason.textContent =
+                        reasonText ||
+                        "Enter the NOMYO Router API key to continue.";
+                }
+                const status = document.getElementById("api-key-status");
+                if (status) {
+                    status.textContent = "";
+                }
+
+                const input = document.getElementById("api-key-input");
+                if (input) {
+                    input.value = getStoredApiKey();
+                    setTimeout(() => input.focus(), 10);
+                }
+
+                overlay.style.display = "flex";
+                return new Promise((resolve) => apiKeyWaiters.push(resolve));
+            }
+
+            function closeApiKeyModal(statusMessage) {
+                const overlay = document.getElementById("api-key-modal");
+                const status = document.getElementById("api-key-status");
+                if (status) {
+                    status.textContent = statusMessage || "";
+                }
+                if (overlay) {
+                    overlay.style.display = "none";
+                }
+                if (getStoredApiKey()) {
+                    document.body.classList.remove("auth-locked");
+                }
+                while (apiKeyWaiters.length) {
+                    const resolve = apiKeyWaiters.pop();
+                    resolve();
+                }
+            }
+
+            async function authedFetch(url, options = {}, allowRetry = true) {
+                const headers = new Headers(options.headers || {});
+                const key = getStoredApiKey();
+                if (key) {
+                    headers.set("Authorization", `Bearer ${key}`);
+                }
+                const response = await fetch(url, { ...options, headers });
+                if ((response.status === 401 || response.status === 403) && allowRetry) {
+                    await showApiKeyModal("Enter the NOMYO Router API key to continue.");
+                    return authedFetch(url, options, false);
+                }
+                return response;
+            }
 
 /* Integrated modal initialization and close handling into the main load block */
 
@@ -505,11 +630,11 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
   chart.data.labels = labels;
   chart.data.datasets[0].data = inputData;
   chart.data.datasets[1].data = outputData;
-  chart.update();
+            chart.update();
 }
             /* ---------- Utility ---------- */
-            async function fetchJSON(url) {
-                const resp = await fetch(url);
+            async function fetchJSON(url, options = {}) {
+                const resp = await authedFetch(url, options);
                 if (!resp.ok) {
                     throw new Error(`Failed ${url}: ${resp.status}`);
                 }
@@ -524,6 +649,9 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
             async function loadEndpoints() {
                 try {
                     const data = await fetchJSON("/api/config");
+                    if (data.require_router_api_key && !getStoredApiKey()) {
+                        showApiKeyModal("Enter the NOMYO Router API key to load the dashboard.");
+                    }
                     const body = document.getElementById("endpoints-body");
                     body.innerHTML = data.endpoints
                         .map((e) => {
@@ -580,7 +708,7 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
                             );
                             if (!dest) return;
                             try {
-                                const resp = await fetch(
+                                const resp = await authedFetch(
                                     `/api/copy?source=${encodeURIComponent(source)}&destination=${encodeURIComponent(dest)}`,
                                     { method: "POST" },
                                 );
@@ -613,7 +741,7 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
                                 );
                                 if (ok) {
                                     try {
-                                        const resp = await fetch(
+                                        const resp = await authedFetch(
                                             `/api/delete?model=${encodeURIComponent(model)}`,
                                             { method: "DELETE" },
                                         );
@@ -689,8 +817,12 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
                 return Math.abs(hash);
             }
             async function loadUsage() {
-                // Create the EventSource once and keep it around
-                const source = new EventSource("/api/usage-stream");
+                if (usageSource) {
+                    usageSource.close();
+                    usageSource = null;
+                }
+                const source = new EventSource(buildAuthedUrl("/api/usage-stream"));
+                usageSource = source;
 
                 // Helper that receives the payload and renders the chart
                 const renderChart = (data) => {
@@ -734,7 +866,8 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
                         psRows.forEach((row, model) => {
                             let tokenTotal = 0;
                             for (const ep in tokens) {
-                                tokenTotal += tokens[ep][model] || 0;
+                                const endpointTokens = tokens[ep] || {};
+                                tokenTotal += endpointTokens[model] || 0;
                             }
                             const tokenCell = row.querySelector(".token-usage");
                             if (tokenCell) tokenCell.textContent = tokenTotal;
@@ -744,14 +877,44 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
                     }
                 };
 
-                source.onerror = (err) => {
+                source.onerror = async (err) => {
                     console.error("SSE connection error. Retrying...", err);
+                    source.close();
+                    await showApiKeyModal("Enter the NOMYO Router API key to view live usage.");
+                    loadUsage();
                 };
                 window.addEventListener("beforeunload", () => source.close());
             }
 
             /* ---------- Init ---------- */
             window.addEventListener("load", () => {
+                updateApiKeyIndicator();
+                const apiKeyModal = document.getElementById("api-key-modal");
+                if (apiKeyModal) {
+                    apiKeyModal.addEventListener("click", (e) => {
+                        if (e.target === apiKeyModal || e.target.matches(".close-btn")) {
+                            closeApiKeyModal();
+                        }
+                    });
+                }
+                const saveKeyBtn = document.getElementById("api-key-save");
+                if (saveKeyBtn) {
+                    saveKeyBtn.addEventListener("click", () => {
+                        const key = document.getElementById("api-key-input")?.value.trim();
+                        setStoredApiKey(key);
+                        closeApiKeyModal(key ? "API key saved." : "API key cleared.");
+                        loadUsage();
+                    });
+                }
+                const clearKeyBtn = document.getElementById("api-key-clear");
+                if (clearKeyBtn) {
+                    clearKeyBtn.addEventListener("click", () => {
+                        setStoredApiKey("");
+                        closeApiKeyModal("API key cleared.");
+                        loadUsage();
+                    });
+                }
+
                 loadEndpoints();
                 loadTags();
                 loadPS();
@@ -765,7 +928,7 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
                     e.preventDefault();
                     const model = e.target.dataset.model;
                     try {
-                        const resp = await fetch(
+                        const resp = await authedFetch(
                             `/api/show?model=${encodeURIComponent(model)}`,
                             { method: "POST" },
                         );
@@ -802,7 +965,7 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
                             return;
                         }
                         try {
-                            const resp = await fetch(
+                            const resp = await authedFetch(
                                 `/api/pull?model=${encodeURIComponent(model)}`,
                                 { method: "POST" },
                             );
@@ -836,7 +999,7 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
                     e.preventDefault();
                     const model = e.target.dataset.model;
                     try {
-                        const resp = await fetch(
+                        const resp = await authedFetch(
                             `/api/stats?model=${encodeURIComponent(model)}`,
                             { method: "POST" },
                         );
@@ -1003,14 +1166,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (totalBtn) {
         totalBtn.addEventListener('click', async () => {
             try {
-                const resp = await fetch('/api/token_counts');
+                const resp = await authedFetch('/api/token_counts');
                 const data = await resp.json();
                 const modal = document.getElementById('total-tokens-modal');
                 const numberEl = document.getElementById('total-tokens-number');
                 numberEl.textContent = data.total_tokens;
                 document.getElementById('aggregation-status').textContent = 'Aggregating...';
                 try {
-                    const aggResp = await fetch('/api/aggregate_time_series_days', {
+                    const aggResp = await authedFetch('/api/aggregate_time_series_days', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ days: 30 , trim_old: true})
@@ -1118,6 +1281,25 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 </script>
+
+        <div id="api-key-modal" class="modal">
+            <div class="modal-content">
+                <span class="close-btn">&times;</span>
+                <h2>Router API Key</h2>
+                <p id="api-key-reason" class="modal-message">Enter the NOMYO Router API key to continue.</p>
+                <input
+                    id="api-key-input"
+                    type="password"
+                    placeholder="NOMYO Router API key"
+                    autocomplete="off"
+                />
+                <div class="modal-actions">
+                    <button id="api-key-clear">Clear</button>
+                    <button id="api-key-save">Save</button>
+                </div>
+                <p id="api-key-status" class="loading"></p>
+            </div>
+        </div>
 
         <div id="show-modal" class="modal">
             <div class="modal-content">

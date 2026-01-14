@@ -36,6 +36,8 @@ doc/
    endpoints:
      - http://localhost:11434
    max_concurrent_connections: 2
+  # Optional router-level API key (leave blank to disable)
+  nomyo-router-api-key: ""
    ```
 3. **Run the router**:
 
@@ -135,3 +137,15 @@ For additional help:
 5. **Scale as needed** by adding more endpoints
 
 Happy routing! 🚀
+
+
+## Router API key usage
+
+If the router API key is set (`NOMYO_ROUTER_API_KEY` env or `nomyo-router-api-key` in config), include it in every request:
+- Header (preferred): Authorization: Bearer <router_key>
+- Query param: ?api_key=<router_key>
+
+Example:
+```bash
+curl -H "Authorization: Bearer $NOMYO_ROUTER_API_KEY" http://localhost:12434/api/tags
+```

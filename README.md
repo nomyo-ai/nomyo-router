@@ -23,6 +23,9 @@ endpoints:
 # Maximum concurrent connections *per endpoint‑model pair*
 max_concurrent_connections: 2
 
+# Optional router-level API key to lock down router + dashboard (leave empty to disable)
+nomyo-router-api-key: ""
+
 # API keys for remote endpoints
 # Set an environment variable like OPENAI_KEY
 # Confirm endpoints are exactly as in endpoints block
@@ -45,6 +48,8 @@ pip3 install -r requirements.txt
 
 ```
 export OPENAI_KEY=YOUR_SECRET_API_KEY
+# Optional: router-level key (clients must send Authorization: Bearer)
+# export NOMYO_ROUTER_API_KEY=YOUR_ROUTER_KEY
 ```
 
 finally you can
@@ -91,3 +96,17 @@ This way the Ollama backend servers are utilized more efficient than by simply u
 ![routing](https://github.com/user-attachments/assets/ed05dfbb-fcc8-4ff2-b8ca-3cdce2660c9f)
 
 NOMYO Router also supports OpenAI API compatible v1 backend servers.
+
+
+## Supplying the router API key
+
+If you set `nomyo-router-api-key` in `config.yaml` (or `NOMYO_ROUTER_API_KEY` env), every request to NOMYO Router must include the key:
+
+- HTTP header (recommended): `Authorization: Bearer <router_key>`
+- Query param (fallback): `?api_key=<router_key>`
+
+Examples:
+```bash
+curl -H "Authorization: Bearer $NOMYO_ROUTER_API_KEY" http://localhost:12434/api/tags
+curl "http://localhost:12434/api/tags?api_key=$NOMYO_ROUTER_API_KEY"
+```

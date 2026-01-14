@@ -14,6 +14,9 @@ endpoints:
 
 # Maximum concurrent connections *per endpoint‑model pair*
 max_concurrent_connections: 2
+
+# Optional router-level API key to secure the router and dashboard (leave blank to disable)
+nomyo-router-api-key: ""
 ```
 
 ### Complete Example
@@ -28,6 +31,9 @@ endpoints:
 
 # Maximum concurrent connections *per endpoint‑model pair* (equals to OLLAMA_NUM_PARALLEL)
 max_concurrent_connections: 2
+
+# Optional router-level API key to secure the router and dashboard (leave blank to disable)
+nomyo-router-api-key: ""
 
 # API keys for remote endpoints
 # Set an environment variable like OPENAI_KEY
@@ -80,6 +86,21 @@ max_concurrent_connections: 4
 - When this limit is reached, the router will route requests to other endpoints with available capacity
 - Higher values allow more parallel requests but may increase memory usage
 
+### `router_api_key`
+
+**Type**: `str` (optional)
+
+**Description**: Shared secret that gates access to the NOMYO Router APIs and dashboard. When set, clients must send `Authorization: Bearer <key>` or an `api_key` query parameter.
+
+**Example**:
+```yaml
+nomyo-router-api-key: "super-secret-value"
+```
+
+**Notes**:
+- Leave this blank or omit it to disable router-level authentication.
+- You can also set the `NOMYO_ROUTER_API_KEY` environment variable to avoid storing the key in plain text.
+
 ### `api_keys`
 
 **Type**: `dict[str, str]`
@@ -116,6 +137,15 @@ export NOMYO_ROUTER_CONFIG_PATH=/etc/nomyo-router/config.yaml
 **Example**:
 ```bash
 export NOMYO_ROUTER_DB_PATH=/var/lib/nomyo-router/token_counts.db
+```
+
+### `NOMYO_ROUTER_API_KEY`
+
+**Description**: Router-level API key. When set, all router endpoints and the dashboard require this key via `Authorization: Bearer <key>` or the `api_key` query parameter.
+
+**Example**:
+```bash
+export NOMYO_ROUTER_API_KEY=your_router_api_key
 ```
 
 ### API-Specific Keys
@@ -195,3 +225,15 @@ The configuration is loaded at startup and cannot be changed without restarting 
 ## Example Configurations
 
 See the [examples](examples/) directory for ready-to-use configuration examples.
+
+
+### Using the router API key
+
+When `router_api_key`/`NOMYO_ROUTER_API_KEY` is set, clients must send it on every request:
+- Header (recommended): Authorization: Bearer <router_key>
+- Query param (fallback): ?api_key=<router_key>
+
+Example:
+```bash
+curl -H "Authorization: Bearer $NOMYO_ROUTER_API_KEY" http://localhost:12434/api/tags
+```
