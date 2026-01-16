@@ -35,6 +35,13 @@ _loaded_models_cache: dict[str, tuple[Set[str], float]] = {}
 _error_cache: dict[str, float] = {}
 
 # ------------------------------------------------------------------
+# Cache locks
+# ------------------------------------------------------------------
+_models_cache_lock = asyncio.Lock()
+_loaded_models_cache_lock = asyncio.Lock()
+_error_cache_lock = asyncio.Lock()
+
+# ------------------------------------------------------------------
 # Queues
 # ------------------------------------------------------------------
 _subscribers: Set[asyncio.Queue] = set()
@@ -226,6 +233,10 @@ async def token_worker() -> None:
     try:
         while True:
             endpoint, model, prompt, comp = await token_queue.get()
+            # Calculate timestamp once before acquiring lock
+            now = datetime.now(tz=timezone.utc)
+            timestamp = int(datetime(now.year, now.month, now.day, now.hour, now.minute, tzinfo=timezone.utc).timestamp())
+
             # Accumulate counts in memory buffer (protected by lock)
             async with buffer_lock:
                 token_buffer[endpoint][model] = (
@@ -234,8 +245,6 @@ async def token_worker() -> None:
                 )
 
                 # Add to time series buffer with timestamp (UTC)
-                now = datetime.now(tz=timezone.utc)
-                timestamp = int(datetime(now.year, now.month, now.day, now.hour, now.minute, tzinfo=timezone.utc).timestamp())
                 time_series_buffer.append({
                     'endpoint': endpoint,
                     'model': model,
@@ -256,13 +265,15 @@ async def token_worker() -> None:
         while not token_queue.empty():
             try:
                 endpoint, model, prompt, comp = token_queue.get_nowait()
+                # Calculate timestamp once before acquiring lock
+                now = datetime.now(tz=timezone.utc)
+                timestamp = int(datetime(now.year, now.month, now.day, now.hour, now.minute, tzinfo=timezone.utc).timestamp())
+
                 async with buffer_lock:
                     token_buffer[endpoint][model] = (
                         token_buffer[endpoint].get(model, (0, 0))[0] + prompt,
                         token_buffer[endpoint].get(model, (0, 0))[1] + comp
                     )
-                    now = datetime.now(tz=timezone.utc)
-                    timestamp = int(datetime(now.year, now.month, now.day, now.hour, now.minute, tzinfo=timezone.utc).timestamp())
                     time_series_buffer.append({
                         'endpoint': endpoint,
                         'model': model,
@@ -378,19 +389,21 @@ class fetch:
         if api_key is not None:
             headers = {"Authorization": "Bearer " + api_key}
 
-        if endpoint in _models_cache:
-            models, cached_at = _models_cache[endpoint]
-            if _is_fresh(cached_at, 300):
-                return models
-            else:
-                # stale entry – drop it
+        # Check models cache with lock protection
+        async with _models_cache_lock:
+            if endpoint in _models_cache:
+                models, cached_at = _models_cache[endpoint]
+                if _is_fresh(cached_at, 300):
+                    return models
+                # Stale entry - remove it
                 del _models_cache[endpoint]
 
-        if endpoint in _error_cache:
-            if _is_fresh(_error_cache[endpoint], 10):
-                # Still within the short error TTL – pretend nothing is available
-                return set()
-            else:
+        # Check error cache with lock protection
+        async with _error_cache_lock:
+            if endpoint in _error_cache:
+                if _is_fresh(_error_cache[endpoint], 10):
+                    # Still within the short error TTL – pretend nothing is available
+                    return set()
                 # Error expired – remove it
                 del _error_cache[endpoint]
 
@@ -408,19 +421,22 @@ class fetch:
 
                 items = data.get(key, [])
                 models = {item.get("id") or item.get("name") for item in items if item.get("id") or item.get("name")}
-                
-                if models:
-                    _models_cache[endpoint] = (models, time.time())
-                    return models
-                else:
-                    # Empty list – treat as “no models”, but still cache for 300s
-                    _models_cache[endpoint] = (models, time.time())
-                    return models
+
+                # Update cache with lock protection
+                async with _models_cache_lock:
+                    if models:
+                        _models_cache[endpoint] = (models, time.time())
+                    else:
+                        # Empty list – treat as "no models", but still cache for 300s
+                        _models_cache[endpoint] = (models, time.time())
+                return models
         except Exception as e:
             # Treat any error as if the endpoint offers no models
             message = _format_connection_issue(endpoint_url, e)
             print(f"[fetch.available_models] {message}")
-            _error_cache[endpoint] = time.time()
+            # Update error cache with lock protection
+            async with _error_cache_lock:
+                _error_cache[endpoint] = time.time()
             return set()
 
 
@@ -432,19 +448,24 @@ class fetch:
         """
         if is_ext_openai_endpoint(endpoint):
             return set()
-        if endpoint in _loaded_models_cache:
-            models, cached_at = _loaded_models_cache[endpoint]
-            if _is_fresh(cached_at, 30):
-                return models
-            else:
-                # stale entry – drop it
+
+        # Check loaded models cache with lock protection
+        async with _loaded_models_cache_lock:
+            if endpoint in _loaded_models_cache:
+                models, cached_at = _loaded_models_cache[endpoint]
+                if _is_fresh(cached_at, 30):
+                    return models
+                # Stale entry - remove it
                 del _loaded_models_cache[endpoint]
 
-        if endpoint in _error_cache:
-            if _is_fresh(_error_cache[endpoint], 10):
-                return set()
-            else:
+        # Check error cache with lock protection
+        async with _error_cache_lock:
+            if endpoint in _error_cache:
+                if _is_fresh(_error_cache[endpoint], 10):
+                    return set()
+                # Error expired - remove it
                 del _error_cache[endpoint]
+
         client: aiohttp.ClientSession = app_state["session"]
         try:
             async with client.get(f"{endpoint}/api/ps") as resp:
@@ -453,7 +474,10 @@ class fetch:
             # The response format is:
             #   {"models": [{"name": "model1"}, {"name": "model2"}]}
             models = {m.get("name") for m in data.get("models", []) if m.get("name")}
-            _loaded_models_cache[endpoint] = (models, time.time())
+
+            # Update cache with lock protection
+            async with _loaded_models_cache_lock:
+                _loaded_models_cache[endpoint] = (models, time.time())
             return models
         except Exception as e:
             # If anything goes wrong we simply assume the endpoint has no models
