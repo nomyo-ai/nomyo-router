@@ -980,8 +980,15 @@ async def choose_endpoint(model: str) -> str:
         ]
         
         if loaded_and_free:
-            ep = min(loaded_and_free, key=current_usage)
-            return ep
+            # Sort by total endpoint usage first (prefer idle endpoints)
+            # Then by per-model usage (balance load for this specific model)
+            loaded_and_free.sort(
+                key=lambda ep: (
+                    sum(usage_counts.get(ep, {}).values()),  # Primary: total endpoint usage
+                    usage_counts.get(ep, {}).get(model, 0)   # Secondary: per-model usage
+                )
+            )
+            return loaded_and_free[0]
 
         # 4️⃣ Endpoints among the candidates that simply have a free slot
         endpoints_with_free_slot = [
@@ -990,8 +997,14 @@ async def choose_endpoint(model: str) -> str:
         ]
 
         if endpoints_with_free_slot:
-            #return random.choice(endpoints_with_free_slot)
-            endpoints_with_free_slot.sort(key=lambda ep: sum(usage_counts.get(ep, {}).values()))
+            # Sort by total endpoint usage first (prefer idle endpoints)
+            # Then by per-model usage (balance load for this specific model)
+            endpoints_with_free_slot.sort(
+                key=lambda ep: (
+                    sum(usage_counts.get(ep, {}).values()),  # Primary: total endpoint usage
+                    usage_counts.get(ep, {}).get(model, 0)   # Secondary: per-model usage
+                )
+            )
             return endpoints_with_free_slot[0]
 
         # 5️⃣ All candidate endpoints are saturated – pick one with lowest usages count (will queue)
