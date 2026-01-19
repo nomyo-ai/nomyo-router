@@ -980,13 +980,11 @@ async def choose_endpoint(model: str) -> str:
         ]
         
         if loaded_and_free:
-            # Sort by total endpoint usage first (prefer idle endpoints)
-            # Then by per-model usage (balance load for this specific model)
+            # Sort by per-model usage in DESCENDING order to ensure model affinity
+            # Endpoints with higher usage (already handling this model) should be preferred
+            # until they reach max_concurrent_connections
             loaded_and_free.sort(
-                key=lambda ep: (
-                    sum(usage_counts.get(ep, {}).values()),  # Primary: total endpoint usage
-                    usage_counts.get(ep, {}).get(model, 0)   # Secondary: per-model usage
-                )
+                key=lambda ep: -usage_counts.get(ep, {}).get(model, 0)  # Negative for descending order
             )
             return loaded_and_free[0]
 
@@ -997,12 +995,14 @@ async def choose_endpoint(model: str) -> str:
         ]
 
         if endpoints_with_free_slot:
-            # Sort by total endpoint usage first (prefer idle endpoints)
-            # Then by per-model usage (balance load for this specific model)
+            # Sort by per-model usage (descending) first to ensure model affinity
+            # Even if the model isn't showing as "loaded" in /api/ps yet (e.g., during initial loading),
+            # we want to send subsequent requests to the endpoint that already has connections for this model
+            # Then by total endpoint usage (ascending) to balance idle endpoints
             endpoints_with_free_slot.sort(
                 key=lambda ep: (
-                    sum(usage_counts.get(ep, {}).values()),  # Primary: total endpoint usage
-                    usage_counts.get(ep, {}).get(model, 0)   # Secondary: per-model usage
+                    -usage_counts.get(ep, {}).get(model, 0),  # Primary: per-model usage (descending - prefer endpoints with connections)
+                    sum(usage_counts.get(ep, {}).values())    # Secondary: total endpoint usage (ascending - prefer idle endpoints)
                 )
             )
             return endpoints_with_free_slot[0]
