@@ -195,7 +195,9 @@ def _extract_router_api_key(request: Request) -> Optional[str]:
     """
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.lower().startswith("bearer "):
-        return auth_header.split(" ", 1)[1].strip()
+        key = auth_header.split(" ", 1)[1].strip()
+        if key:  # Ensure key is not empty
+            return key
     query_key = request.query_params.get("api_key")
     if query_key:
         return query_key
@@ -234,10 +236,13 @@ async def enforce_router_api_key(request: Request, call_next):
     # Strip the api_key query param from scope so access logs do not leak it
     _strip_api_key_from_scope(request)
     if provided_key is None:
-        return JSONResponse(
-            content={"detail": "Missing NOMYO Router API key"},
-            status_code=401,
-        )
+        response = await call_next(request)
+        # Add CORS headers for API key authentication requests
+        if "/api/" in path and path != "/api/usage-stream":
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        return response
 
     if not secrets.compare_digest(str(provided_key), str(expected_key)):
         return JSONResponse(
@@ -245,7 +250,13 @@ async def enforce_router_api_key(request: Request, call_next):
             status_code=403,
         )
 
-    return await call_next(request)
+    response = await call_next(request)
+    # Add CORS headers for authenticated API requests
+    if "/api/" in path and path != "/api/usage-stream":
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    return response
         
 # -------------------------------------------------------------
 # 3. Global state: per‑endpoint per‑model active connection counters
