@@ -2,7 +2,7 @@
 
 is a transparent proxy for [Ollama](https://github.com/ollama/ollama) with model deployment aware routing.
 
-<img width="2490" height="1298" alt="Screenshot_NOMYO_Router_0-2-2_Dashboard" src="https://github.com/user-attachments/assets/ddacdf88-e3f3-41dd-8be6-f165b22d9879" /><br>
+https://eu1.nomyo.ai/assets/dash.mp4
 
 It runs between your frontend application and Ollama backend and is transparent for both, the front- and backend.
 
@@ -73,6 +73,7 @@ docker run -d \
 ```
 
 Notes:
+
 - `-e CONFIG_PATH` sets the `NOMYO_ROUTER_CONFIG_PATH` environment variable under the hood; you can export it directly instead if you prefer.
 - To override the bind address or port, export `UVICORN_HOST` or `UVICORN_PORT`, or pass the corresponding uvicorn flags after `--`, e.g. `nomyo-router --config-path /config/config.yaml -- --port 9000`.
 - Use `docker logs nomyo-router` to confirm the loaded endpoints and concurrency settings at startup.
