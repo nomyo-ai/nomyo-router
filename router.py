@@ -6,14 +6,14 @@ version: 0.5
 license: AGPL
 """
 # -------------------------------------------------------------
-import orjson, time, asyncio, yaml, ollama, openai, os, re, aiohttp, ssl, random, base64, io, enhance
+import orjson, time, asyncio, yaml, ollama, openai, os, re, aiohttp, ssl, random, base64, io, enhance, secrets
 from datetime import datetime, timezone
 from pathlib import Path
 
 # Directory containing static files (relative to this script)
 STATIC_DIR = Path(__file__).parent / "static"
 from typing import Dict, Set, List, Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qsl, urlencode
 from fastapi import FastAPI, Request, HTTPException
 from fastapi_sse import sse_handler
 from fastapi.staticfiles import StaticFiles
@@ -40,6 +40,20 @@ _error_cache: dict[str, float] = {}
 _subscribers: Set[asyncio.Queue] = set()
 _subscribers_lock = asyncio.Lock()
 token_queue: asyncio.Queue[tuple[str, str, int, int]] = asyncio.Queue()
+
+# -------------------------------------------------------------
+# Secret handling
+# -------------------------------------------------------------
+def _mask_secrets(text: str) -> str:
+    """
+    Mask common API key patterns to avoid leaking secrets in logs or error payloads.
+    """
+    if not text:
+        return text
+    # OpenAI-style keys (sk-...) and generic "api key" mentions
+    text = re.sub(r"sk-[A-Za-z0-9]{4}[A-Za-z0-9_-]*", "sk-***redacted***", text)
+    text = re.sub(r"(?i)(api[-_ ]key\\s*[:=]\\s*)([^\\s]+)", r"\\1***redacted***", text)
+    return text
 
 # ------------------------------------------------------------------
 # Globals
@@ -78,6 +92,8 @@ class Config(BaseSettings):
     max_concurrent_connections: int = 1
 
     api_keys: Dict[str, str] = Field(default_factory=dict)
+    # Optional router-level API key used to gate access to this service and dashboard
+    router_api_key: Optional[str] = Field(default=None, env="NOMYO_ROUTER_API_KEY")
 
     # Database configuration
     db_path: str = Field(default=os.getenv("NOMYO_ROUTER_DB_PATH", "token_counts.db"))
@@ -108,6 +124,29 @@ class Config(BaseSettings):
             with path.open("r", encoding="utf-8") as fp:
                 data = yaml.safe_load(fp) or {}
                 cleaned = cls._expand_env_refs(data)
+                if isinstance(cleaned, dict):
+                    # Accept hyphenated config key and map it to the field name
+                    key_aliases = [
+                        # canonical field name
+                        "router_api_key",
+                        # lowercase, hyphen/underscore variants
+                        "nomyo-router-api-key",
+                        "nomyo_router_api_key",
+                        "nomyo-router_api_key",
+                        "nomyo_router-api_key",
+                        # uppercase env-style variants
+                        "NOMYO-ROUTER_API_KEY",
+                        "NOMYO_ROUTER_API_KEY",
+                    ]
+                    for alias in key_aliases:
+                        if alias in cleaned:
+                            cleaned["router_api_key"] = cleaned.get("router_api_key", cleaned.pop(alias))
+                            break
+                    # If not present in YAML (or empty), fall back to env var explicitly
+                    if not cleaned.get("router_api_key"):
+                        env_key = os.getenv("NOMYO_ROUTER_API_KEY")
+                        if env_key:
+                            cleaned["router_api_key"] = env_key
             return cls(**cleaned)
         return cls()
 
@@ -146,6 +185,80 @@ default_headers={
     }
         
 # -------------------------------------------------------------
+# Router-level authentication (optional)
+# -------------------------------------------------------------
+def _extract_router_api_key(request: Request) -> Optional[str]:
+    """
+    Extract the provided router API key from the Authorization header or `api_key`
+    query parameter. The middleware uses this to gate access to API routes when
+    a router_api_key is configured.
+    """
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.lower().startswith("bearer "):
+        key = auth_header.split(" ", 1)[1].strip()
+        if key:  # Ensure key is not empty
+            return key
+    query_key = request.query_params.get("api_key")
+    if query_key:
+        return query_key
+    return None
+
+
+def _strip_api_key_from_scope(request: Request) -> None:
+    """
+    Remove api_key from the ASGI scope query string to avoid leaking it in logs.
+    """
+    scope = request.scope
+    raw_qs = scope.get("query_string", b"")
+    if not raw_qs:
+        return
+    params = parse_qsl(raw_qs.decode("utf-8"), keep_blank_values=True)
+    filtered = [(k, v) for (k, v) in params if k != "api_key"]
+    scope["query_string"] = urlencode(filtered).encode("utf-8")
+
+
+@app.middleware("http")
+async def enforce_router_api_key(request: Request, call_next):
+    """
+    Enforce the optional NOMYO Router API key for all non-static requests.
+    When `config.router_api_key` is set, clients must supply the key either in
+    the Authorization header (`Bearer <key>`) or as `api_key` query parameter.
+    """
+    expected_key = config.router_api_key
+    if not expected_key or request.method == "OPTIONS":
+        return await call_next(request)
+
+    path = request.url.path
+    if path.startswith("/static") or path in {"/", "/favicon.ico"}:
+        return await call_next(request)
+
+    provided_key = _extract_router_api_key(request)
+    # Strip the api_key query param from scope so access logs do not leak it
+    _strip_api_key_from_scope(request)
+    if provided_key is None:
+        response = await call_next(request)
+        # Add CORS headers for API key authentication requests
+        if "/api/" in path and path != "/api/usage-stream":
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        return response
+
+    if not secrets.compare_digest(str(provided_key), str(expected_key)):
+        return JSONResponse(
+            content={"detail": "Invalid NOMYO Router API key"},
+            status_code=403,
+        )
+
+    response = await call_next(request)
+    # Add CORS headers for authenticated API requests
+    if "/api/" in path and path != "/api/usage-stream":
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    return response
+        
+# -------------------------------------------------------------
 # 3. Global state: per‑endpoint per‑model active connection counters
 # -------------------------------------------------------------
 usage_counts: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
@@ -165,7 +278,7 @@ def _is_fresh(cached_at: float, ttl: int) -> bool:
 async def _ensure_success(resp: aiohttp.ClientResponse) -> None:
     if resp.status >= 400:
         text = await resp.text()
-        raise HTTPException(status_code=resp.status, detail=text)
+        raise HTTPException(status_code=resp.status, detail=_mask_secrets(text))
     
 def _format_connection_issue(url: str, error: Exception) -> str:
     """
@@ -1809,7 +1922,10 @@ async def config_proxy(request: Request):
             return {"url": url, "status": "error", "detail": detail}
 
     results = await asyncio.gather(*[check_endpoint(ep) for ep in config.endpoints])
-    return {"endpoints": results}
+    return {
+        "endpoints": results,
+        "require_router_api_key": bool(config.router_api_key),
+    }
 
 # -------------------------------------------------------------
 # 21. API route – OpenAI compatible Embedding

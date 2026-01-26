@@ -21,6 +21,9 @@ endpoints:
   - http://localhost:11434
 
 max_concurrent_connections: 2
+
+# Optional router-level API key (leave blank to disable)
+nomyo-router-api-key: ""
 ```
 
 ### 3. Run the Router
@@ -346,3 +349,15 @@ print(f"Available models: {[m.id for m in response.data]}")
 ## Examples
 
 See the [examples](examples/) directory for complete integration examples.
+
+
+### Authentication to NOMYO Router
+
+If a router API key is configured, include it with each request:
+- Header: Authorization: Bearer <router_key>
+- Query: ?api_key=<router_key>
+
+Example (tags):
+```bash
+curl -H "Authorization: Bearer $NOMYO_ROUTER_API_KEY" http://localhost:12434/api/tags
+```

@@ -6,6 +6,9 @@ endpoints:
 
 max_concurrent_connections: 2
 
+# Optional router-level API key to secure the router and dashboard (leave blank to disable)
+nomyo-router-api-key: ""
+
 # Multi-endpoint configuration with local Ollama instances
 # endpoints:
 #   - http://ollama-worker1:11434

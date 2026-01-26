@@ -8,6 +8,9 @@ endpoints:
 # Maximum concurrent connections *per endpoint‑model pair* (equals to OLLAMA_NUM_PARALLEL)
 max_concurrent_connections: 2
 
+# Optional router-level API key that gates router/API/web UI access (leave empty to disable)
+nomyo-router-api-key: ""
+
 # API keys for remote endpoints
 # Set an environment variable like OPENAI_KEY
 # Confirm endpoints are exactly as in endpoints block
