@@ -50,7 +50,7 @@ Options:
 Any arguments that remain after the options above are passed directly to uvicorn.
 
 Environment variables:
-  CONFIG_PATH               Alternative way to specify the config path.
+  CONFIG_PATH_ARG           Alternative way to specify the config path.
   NOMYO_ROUTER_CONFIG_PATH  Overrides the config path (same as --config-path).
   UVICORN_HOST              Host interface to bind to (default: 0.0.0.0).
   UVICORN_PORT              Port to listen on (default: 12434).

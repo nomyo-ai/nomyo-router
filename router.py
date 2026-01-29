@@ -2,7 +2,7 @@
 title: NOMYO Router - an Ollama Proxy with Endpoint:Model aware routing
 author: alpha-nerd-nomyo
 author_url: https://github.com/nomyo-ai
-version: 0.5
+version: 0.6
 license: AGPL
 """
 # -------------------------------------------------------------
