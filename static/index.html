@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
     <head>
         <meta charset="UTF-8" />
@@ -42,6 +42,7 @@
                 background: white;
                 padding: 1rem;
                 border-radius: 6px;
+                overflow-x: auto;
             }
             .endpoints-container {
                 flex: 1;
@@ -113,6 +114,32 @@
             }
             th {
                 background: #e0e0e0;
+            }
+            .ps-subrow {
+                display: block;
+            }
+            .ps-subrow + .ps-subrow {
+                margin-top: 2px;
+            }
+            #ps-table {
+                width: max-content;
+                min-width: 100%;
+            }
+            #ps-table th.model-col,
+            #ps-table td.model {
+                min-width: 200px;
+                max-width: 300px;
+                white-space: nowrap;
+            }
+            /* Optimize narrow columns */
+            #ps-table th:nth-child(3),
+            #ps-table td:nth-child(3),
+            #ps-table th:nth-child(4),
+            #ps-table td:nth-child(4),
+            #ps-table th:nth-child(5),
+            #ps-table td:nth-child(5) {
+                width: 80px;
+                text-align: center;
             }
             .loading {
                 color: #777;
@@ -346,12 +373,15 @@
                 <table id="ps-table">
                     <thead>
                         <tr>
-                            <th>Model</th>
+                            <th class="model-col">Model</th>
+                            <th>Endpoint</th>
                             <th>Params</th>
                             <th>Quant</th>
                             <th>Ctx</th>
+                            <th>Size</th>
+                            <th>Until</th>
                             <th>Digest</th>
-                            <th>Token</th>
+                            <th>Tokens</th>
                         </tr>
                     </thead>
                     <tbody id="ps-body">
@@ -698,6 +728,7 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
                     document.getElementById("tags-count").textContent =
                         `${data.models.length}`;
 
+
                     /* copy logic */
                     document.querySelectorAll(".copy-link").forEach((link) => {
                         link.addEventListener("click", async (e) => {
@@ -769,23 +800,114 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
             /* ---------- PS ---------- */
             async function loadPS() {
                 try {
-                    const data = await fetchJSON("/api/ps");
+                    let instances = [];
+                    try {
+                        const detailed = await fetchJSON("/api/ps_details");
+                        instances = Array.isArray(detailed.models) ? detailed.models : [];
+                    } catch (err) {
+                        console.error("Failed to load ps_details, falling back to /api/ps", err);
+                        const fallback = await fetchJSON("/api/ps");
+                        instances = (fallback.models || []).map((m) => ({
+                            ...m,
+                            endpoint: "unknown",
+                        }));
+                    }
                     const body = document.getElementById("ps-body");
-                    body.innerHTML = data.models
-                        .map(m => {
-                            const existingRow = psRows.get(m.name);
+                    const grouped = new Map();
+                    for (const instance of instances) {
+                        if (!instance || !instance.name) continue;
+                        if (!grouped.has(instance.name)) grouped.set(instance.name, []);
+                        grouped.get(instance.name).push(instance);
+                    }
+
+                    const formatBytes = (value) => {
+                        if (value === null || value === undefined || value === "") return "";
+                        if (typeof value === "string") return value;
+                        if (typeof value !== "number" || Number.isNaN(value)) return "";
+                        const units = ["B", "KB", "MB", "GB", "TB"];
+                        let size = value;
+                        let unitIndex = 0;
+                        while (size >= 1024 && unitIndex < units.length - 1) {
+                            size /= 1024;
+                            unitIndex += 1;
+                        }
+                        const precision = size >= 10 || unitIndex == 0 ? 0 : 1;
+                        return `${size.toFixed(precision)} ${units[unitIndex]}`;
+                    };
+
+                    const formatUntil = (value) => {
+                        if (value === null || value === undefined || value === "") {
+                            return "Forever";
+                        }
+
+                        let targetTime;
+                        if (typeof value === "number") {
+                            const ms = value > 1e12 ? value : value * 1000;
+                            targetTime = new Date(ms);
+                        } else if (typeof value === "string") {
+                            targetTime = new Date(value);
+                        } else {
+                            return String(value);
+                        }
+
+                        if (Number.isNaN(targetTime.getTime())) {
+                            return String(value);
+                        }
+
+                        const now = new Date();
+                        const diffMs = targetTime - now;
+                        const diffSec = Math.floor(Math.abs(diffMs) / 1000);
+                        const diffMin = Math.floor(diffSec / 60);
+                        const diffHours = Math.floor(diffMin / 60);
+                        const diffDays = Math.floor(diffHours / 24);
+
+                        if (diffMs < 0) {
+                            return "expired";
+                        }
+
+                        if (diffMin < 1) {
+                            return `in ${diffSec} sec`;
+                        } else if (diffMin < 60) {
+                            return `in ${diffMin} min`;
+                        } else if (diffHours < 24) {
+                            return `in ${diffHours} hr`;
+                        } else {
+                            return `in ${diffDays} days`;
+                        }
+                    };
+
+                    const renderInstanceList = (items) => {
+                        if (!items.length) return "";
+                        return items.map((item) => `<div class="ps-subrow">${item || ""}</div>`).join("");
+                    };
+
+                    body.innerHTML = Array.from(grouped.entries())
+                        .map(([modelName, modelInstances]) => {
+                            const existingRow = psRows.get(modelName);
                             const tokenValue = existingRow
                                 ? existingRow.querySelector(".token-usage")?.textContent ?? 0
                                 : 0;
-                            const digest = m.digest || "";
-                            const shortDigest = digest.length > 24
-                                ? `${digest.slice(0, 12)}...${digest.slice(-12)}`
-                                : digest;
-                            return `<tr data-model="${m.name}">
-                                <td class="model">${m.name} <a href="#" class="stats-link" data-model="${m.name}">stats</a></td>
-                                <td>${m.details.parameter_size}</td>
-                                <td>${m.details.quantization_level}</td>
-                                <td>${m.context_length}</td>
+                            const instanceCount = modelInstances.length;
+                            const endpoints = modelInstances.map((m) => m.endpoint || "unknown");
+                            const sizes = modelInstances.map((m) => formatBytes(m.size ?? m.size_vram ?? m.details?.size));
+                            const untils = modelInstances.map((m) =>
+                                formatUntil(m.until ?? m.expires_at ?? m.expiresAt ?? m.expire_at),
+                            );
+                            const digest = modelInstances[0]?.digest || "";
+                            const shortDigest = digest ? digest.slice(-6) : "";
+                            const params = modelInstances[0]?.details?.parameter_size ?? "";
+                            const quant = modelInstances[0]?.details?.quantization_level ?? "";
+                            const ctx = modelInstances[0]?.context_length ?? "";
+                            const uniqueEndpoints = Array.from(new Set(endpoints));
+                            const endpointsData = encodeURIComponent(JSON.stringify(uniqueEndpoints));
+                            return `<tr data-model="${modelName}" data-endpoints="${endpointsData}">
+                                <td class="model">${modelName} <a href="#" class="stats-link" data-model="${modelName}">stats</a></td>
+                                <td>${renderInstanceList(endpoints)}</td>
+                                <td>${params}</td>
+                                <td>${quant}</td>
+                                <td>${ctx}</td>
+                                <td>${renderInstanceList(sizes)}</td>
+                                <td>${renderInstanceList(untils)}</td>
                                 <td>${shortDigest}</td>
                                 <td class="token-usage">${tokenValue}</td>
                             </tr>`;

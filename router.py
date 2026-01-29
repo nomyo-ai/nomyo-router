@@ -1879,6 +1879,28 @@ async def ps_proxy(request: Request):
     )
 
 # -------------------------------------------------------------
+# 18b. API route – ps details (backwards compatible)
+# -------------------------------------------------------------
+@app.get("/api/ps_details")
+async def ps_details_proxy(request: Request):
+    """
+    Proxy a ps request to all Ollama endpoints and reply with per-endpoint instances.
+    This keeps /api/ps backward compatible while providing richer data.
+    """
+    tasks = [(ep, fetch.endpoint_details(ep, "/api/ps", "models")) for ep in config.endpoints if "/v1" not in ep]
+    loaded_models = await asyncio.gather(*[task for _, task in tasks])
+
+    models: list[dict] = []
+    for (endpoint, modellist) in zip([ep for ep, _ in tasks], loaded_models):
+        for model in modellist:
+            if isinstance(model, dict):
+                model_with_endpoint = dict(model)
+                model_with_endpoint["endpoint"] = endpoint
+                models.append(model_with_endpoint)
+
+    return JSONResponse(content={"models": models}, status_code=200)
+
+# -------------------------------------------------------------
 # 19. Proxy usage route – for monitoring
 # -------------------------------------------------------------
 @app.get("/api/usage")
