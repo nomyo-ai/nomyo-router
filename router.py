@@ -532,7 +532,7 @@ def dedupe_on_keys(dicts, key_fields):
 async def increment_usage(endpoint: str, model: str) -> None:
     async with usage_lock:
         usage_counts[endpoint][model] += 1
-    await publish_snapshot()
+        await publish_snapshot()
 
 async def decrement_usage(endpoint: str, model: str) -> None:
     async with usage_lock:
@@ -545,7 +545,7 @@ async def decrement_usage(endpoint: str, model: str) -> None:
             usage_counts[endpoint].pop(model, None)
         #if not usage_counts[endpoint]:
         #    usage_counts.pop(endpoint, None)
-    await publish_snapshot()
+        await publish_snapshot()
 
 async def _make_chat_request(endpoint: str, model: str, messages: list, tools=None, stream: bool = False, think: bool = False, format=None, options=None, keep_alive: str = None) -> ollama.ChatResponse:
     """
