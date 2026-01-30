@@ -21,7 +21,7 @@ jiter==0.10.0
 multidict==6.6.4
 ollama==0.6.0
 openai==1.102.0
-orjson==3.11.4
+orjson>=3.11.5
 pillow==11.3.0
 propcache==0.3.2
 pydantic==2.11.7

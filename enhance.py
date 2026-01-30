@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 
-class feedback(BaseModel):
+class Feedback(BaseModel):
     query_id: int
     content: str
 
@@ -25,13 +25,13 @@ def moe(query: str, query_id: int, response: str) -> str:
 
 def moe_select_candidate(query: str, candidates: list[str]) -> str:
     if not candidates:
-            raise ValueError("No candidates supplied")
+        raise ValueError("No candidates supplied")
 
     candidate_sections = ""
-    for i, cand in enumerate(candidates[:3], start=0):
+    for i, cand in enumerate(candidates[:3], start=1):
         candidate_sections += f"""
         <candidate_{i}>
-        {cand.message.content}
+        {cand}
         </candidate_{i}>
         """
 
@@ -46,4 +46,3 @@ def moe_select_candidate(query: str, candidates: list[str]) -> str:
     Just give the final answer—nothing else.
     """
     return select_prompt.strip()
-

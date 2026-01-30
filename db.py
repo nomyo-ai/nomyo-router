@@ -50,6 +50,7 @@ class TokenDatabase:
                     PRIMARY KEY(endpoint, model)
                 )
             ''')
+            await db.execute('CREATE INDEX IF NOT EXISTS idx_token_time_series_timestamp ON token_time_series(timestamp)')
             await db.execute('''
                 CREATE TABLE IF NOT EXISTS token_time_series (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
