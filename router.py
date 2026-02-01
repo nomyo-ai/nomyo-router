@@ -250,13 +250,19 @@ async def enforce_router_api_key(request: Request, call_next):
     # Strip the api_key query param from scope so access logs do not leak it
     _strip_api_key_from_scope(request)
     if provided_key is None:
-        response = await call_next(request)
-        # Add CORS headers for API key authentication requests
+        # No key provided but authentication is required - return 401
+        headers = {}
         if "/api/" in path and path != "/api/usage-stream":
-            response.headers["Access-Control-Allow-Origin"] = "*"
-            response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
-            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-        return response
+            headers = {
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Authorization, Content-Type",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            }
+        return JSONResponse(
+            content={"detail": "Missing NOMYO Router API key"},
+            status_code=401,
+            headers=headers,
+        )
 
     if not secrets.compare_digest(str(provided_key), str(expected_key)):
         return JSONResponse(
