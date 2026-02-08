@@ -997,11 +997,11 @@ class rechunk:
                 )
         with_thinking = chunk.choices[0] if chunk.choices[0] else None
         if stream == True:
-            thinking = getattr(with_thinking.delta, "reasoning", None) if with_thinking else None
+            thinking = (getattr(with_thinking.delta, "reasoning_content", None) or getattr(with_thinking.delta, "reasoning", None)) if with_thinking else None
             role = chunk.choices[0].delta.role or "assistant"
             content = chunk.choices[0].delta.content or ''
         else:
-            thinking = getattr(with_thinking, "reasoning", None) if with_thinking else None
+            thinking = (getattr(with_thinking.message, "reasoning_content", None) or getattr(with_thinking.message, "reasoning", None)) if with_thinking else None
             role = chunk.choices[0].message.role or "assistant"
             content = chunk.choices[0].message.content or ''
         assistant_msg = ollama.Message(
@@ -1211,7 +1211,7 @@ async def choose_endpoint(model: str) -> str:
             # Then by total endpoint usage (ascending) to balance idle endpoints
             endpoints_with_free_slot.sort(
                 key=lambda ep: (
-                    -usage_counts.get(ep, {}).get(model, 0),  # Primary: per-model usage (descending - prefer endpoints with connections)
+                    #-usage_counts.get(ep, {}).get(model, 0),  # Primary: per-model usage (descending - prefer endpoints with connections)
                     sum(usage_counts.get(ep, {}).values())    # Secondary: total endpoint usage (ascending - prefer idle endpoints)
                 )
             )
