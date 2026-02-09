@@ -1029,13 +1029,32 @@ class rechunk:
             thinking = (getattr(with_thinking.message, "reasoning_content", None) or getattr(with_thinking.message, "reasoning", None)) if with_thinking else None
             role = chunk.choices[0].message.role or "assistant"
             content = chunk.choices[0].message.content or ''
+        # Convert OpenAI tool_calls to Ollama format
+        ollama_tool_calls = None
+        if stream:
+            raw_tool_calls = getattr(with_thinking.delta, "tool_calls", None) if with_thinking else None
+        else:
+            raw_tool_calls = getattr(with_thinking.message, "tool_calls", None) if with_thinking else None
+        if raw_tool_calls:
+            ollama_tool_calls = []
+            for tc in raw_tool_calls:
+                try:
+                    args = orjson.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else (tc.function.arguments or {})
+                except (orjson.JSONDecodeError, TypeError):
+                    args = {}
+                ollama_tool_calls.append({
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": args,
+                    }
+                })
         assistant_msg = ollama.Message(
             role=role,
             content=content,
             thinking=thinking,
             images=None,
             tool_name=None,
-            tool_calls=None)
+            tool_calls=ollama_tool_calls)
         rechunk = ollama.ChatResponse(
             model=chunk.model, 
             created_at=iso8601_ns(),
