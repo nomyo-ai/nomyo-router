@@ -104,6 +104,8 @@ class Config(BaseSettings):
             "http://localhost:11434",
         ]
     )
+    # List of llama-server endpoints (OpenAI-compatible with /v1/models status info)
+    llama_server_endpoints: List[str] = Field(default_factory=list)
     # Max concurrent connections per endpoint‑model pair, see OLLAMA_NUM_PARALLEL
     max_concurrent_connections: int = 1
 
@@ -343,7 +345,50 @@ def _format_connection_issue(url: str, error: Exception) -> str:
 
     return f"Error while contacting {url}: {error}"
 
+def _normalize_llama_model_name(name: str) -> str:
+    """Extract the model name from a huggingface-style identifier.
+    e.g. 'unsloth/gpt-oss-20b-GGUF:F16' -> 'gpt-oss-20b-GGUF'
+    """
+    if "/" in name:
+        name = name.rsplit("/", 1)[1]
+    if ":" in name:
+        name = name.split(":")[0]
+    return name
+
+def _extract_llama_quant(name: str) -> str:
+    """Extract the quantization level from a huggingface-style identifier.
+    e.g. 'unsloth/gpt-oss-20b-GGUF:Q8_0' -> 'Q8_0'
+    Returns empty string if no quant suffix is present.
+    """
+    if ":" in name:
+        return name.rsplit(":", 1)[1]
+    return ""
+
+def _is_llama_model_loaded(item: dict) -> bool:
+    """Return True if a llama-server /v1/models item has status 'loaded'.
+    Handles both dict format ({"value": "loaded"}) and plain string ("loaded")."""
+    status = item.get("status")
+    if isinstance(status, dict):
+        return status.get("value") == "loaded"
+    if isinstance(status, str):
+        return status == "loaded"
+    return False
+
 def is_ext_openai_endpoint(endpoint: str) -> bool:
+    """
+    Determine if an endpoint is an external OpenAI-compatible endpoint (not Ollama or llama-server).
+    
+    Returns True for:
+    - External services like OpenAI.com, Groq, etc.
+    
+    Returns False for:
+    - Ollama endpoints (without /v1, or with /v1 but default port 11434)
+    - llama-server endpoints (explicitly configured in llama_server_endpoints)
+    """
+    # Check if it's a llama-server endpoint (has /v1 and is in the configured list)
+    if endpoint in config.llama_server_endpoints:
+        return False
+    
     if "/v1" not in endpoint:
         return False
     
@@ -356,6 +401,13 @@ def is_ext_openai_endpoint(endpoint: str) -> bool:
         return False  # It's Ollama
     
     return True  # It's an external OpenAI endpoint
+
+def is_openai_compatible(endpoint: str) -> bool:
+    """
+    Return True if the endpoint speaks the OpenAI API (not native Ollama).
+    This includes external OpenAI endpoints AND llama-server endpoints.
+    """
+    return "/v1" in endpoint or endpoint in config.llama_server_endpoints
 
 async def token_worker() -> None:
     try:
@@ -512,7 +564,10 @@ class fetch:
         if api_key is not None:
             headers = {"Authorization": "Bearer " + api_key}
 
-        if "/v1" in endpoint:
+        if endpoint in config.llama_server_endpoints and "/v1" not in endpoint:
+            endpoint_url = f"{endpoint}/v1/models"
+            key = "data"
+        elif "/v1" in endpoint or endpoint in config.llama_server_endpoints:
             endpoint_url = f"{endpoint}/models"
             key = "data"
         else:
@@ -620,25 +675,56 @@ class fetch:
         """
         Internal function that performs the actual HTTP request to fetch loaded models.
         This is called by loaded_models() after checking caches and in-flight requests.
+        
+        For Ollama endpoints: queries /api/ps and returns model names
+        For llama-server endpoints: queries /v1/models and filters for status.value == "loaded"
         """
         client: aiohttp.ClientSession = app_state["session"]
-        try:
-            async with client.get(f"{endpoint}/api/ps") as resp:
-                await _ensure_success(resp)
-                data = await resp.json()
-            # The response format is:
-            #   {"models": [{"name": "model1"}, {"name": "model2"}]}
-            models = {m.get("name") for m in data.get("models", []) if m.get("name")}
+        
+        # Check if this is a llama-server endpoint
+        if endpoint in config.llama_server_endpoints:
+            # Query /v1/models for llama-server
+            try:
+                async with client.get(f"{endpoint}/models") as resp:
+                    await _ensure_success(resp)
+                    data = await resp.json()
+                
+                # Filter for loaded models only
+                items = data.get("data", [])
+                models = {
+                    item.get("id")
+                    for item in items
+                    if item.get("id") and _is_llama_model_loaded(item)
+                }
 
-            # Update cache with lock protection
-            async with _loaded_models_cache_lock:
-                _loaded_models_cache[endpoint] = (models, time.time())
-            return models
-        except Exception as e:
-            # If anything goes wrong we simply assume the endpoint has no models
-            message = _format_connection_issue(f"{endpoint}/api/ps", e)
-            print(f"[fetch.loaded_models] {message}")
-            return set()
+                # Update cache with lock protection
+                async with _loaded_models_cache_lock:
+                    _loaded_models_cache[endpoint] = (models, time.time())
+                return models
+            except Exception as e:
+                # If anything goes wrong we simply assume the endpoint has no models
+                message = _format_connection_issue(f"{endpoint}/models", e)
+                print(f"[fetch.loaded_models] {message}")
+                return set()
+        else:
+            # Original Ollama /api/ps logic
+            try:
+                async with client.get(f"{endpoint}/api/ps") as resp:
+                    await _ensure_success(resp)
+                    data = await resp.json()
+                # The response format is:
+                #   {"models": [{"name": "model1"}, {"name": "model2"}]}
+                models = {m.get("name") for m in data.get("models", []) if m.get("name")}
+
+                # Update cache with lock protection
+                async with _loaded_models_cache_lock:
+                    _loaded_models_cache[endpoint] = (models, time.time())
+                return models
+            except Exception as e:
+                # If anything goes wrong we simply assume the endpoint has no models
+                message = _format_connection_issue(f"{endpoint}/api/ps", e)
+                print(f"[fetch.loaded_models] {message}")
+                return set()
 
     async def _refresh_loaded_models(endpoint: str) -> None:
         """
@@ -776,8 +862,8 @@ async def _make_chat_request(endpoint: str, model: str, messages: list, tools=No
     Helper function to make a chat request to a specific endpoint.
     Handles endpoint selection, client creation, usage tracking, and request execution.
     """
-    is_openai_endpoint = "/v1" in endpoint
-    if is_openai_endpoint:
+    use_openai = is_openai_compatible(endpoint)
+    if use_openai:
         if ":latest" in model:
             model = model.split(":latest")[0]
         if messages:
@@ -800,14 +886,14 @@ async def _make_chat_request(endpoint: str, model: str, messages: list, tools=No
             "response_format": {"type": "json_schema", "json_schema": format} if format is not None else None
         }
         params.update({k: v for k, v in optional_params.items() if v is not None})
-        oclient = openai.AsyncOpenAI(base_url=endpoint, default_headers=default_headers, api_key=config.api_keys[endpoint])
+        oclient = openai.AsyncOpenAI(base_url=ep2base(endpoint), default_headers=default_headers, api_key=config.api_keys.get(endpoint, "no-key"))
     else:
         client = ollama.AsyncClient(host=endpoint)
 
     await increment_usage(endpoint, model)
 
     try:
-        if is_openai_endpoint:
+        if use_openai:
             start_ts = time.perf_counter()
             response = await oclient.chat.completions.create(**params)
             if stream:
@@ -1179,35 +1265,40 @@ async def choose_endpoint(model: str) -> str:
     6️⃣  If no endpoint advertises the model at all, raise an error.
     """
     # 1️⃣  Gather advertised‑model sets for all endpoints concurrently
-    tag_tasks = [fetch.available_models(ep) for ep in config.endpoints if "/v1" not in ep]
-    tag_tasks += [fetch.available_models(ep, config.api_keys[ep]) for ep in config.endpoints if "/v1" in ep]
+    #     Include both config.endpoints and config.llama_server_endpoints
+    llama_eps_extra = [ep for ep in config.llama_server_endpoints if ep not in config.endpoints]
+    all_endpoints = config.endpoints + llama_eps_extra
+
+    tag_tasks = [fetch.available_models(ep) for ep in config.endpoints if not is_openai_compatible(ep)]
+    tag_tasks += [fetch.available_models(ep, config.api_keys.get(ep)) for ep in config.endpoints if is_openai_compatible(ep)]
+    tag_tasks += [fetch.available_models(ep, config.api_keys.get(ep)) for ep in llama_eps_extra]
     advertised_sets = await asyncio.gather(*tag_tasks)
 
     # 2️⃣  Filter endpoints that advertise the requested model
     candidate_endpoints = [
-        ep for ep, models in zip(config.endpoints, advertised_sets)
+        ep for ep, models in zip(all_endpoints, advertised_sets)
         if model in models
     ]
-    
+
     # 6️⃣
     if not candidate_endpoints:
-        if ":latest" in model:  #ollama naming convention not applicable to openai
+        if ":latest" in model:  #ollama naming convention not applicable to openai/llama-server
             model_without_latest = model.split(":latest")[0]
             candidate_endpoints = [
-                ep for ep, models in zip(config.endpoints, advertised_sets)
-                if model_without_latest in models and is_ext_openai_endpoint(ep)
+                ep for ep, models in zip(all_endpoints, advertised_sets)
+                if model_without_latest in models and (is_ext_openai_endpoint(ep) or ep in config.llama_server_endpoints)
             ]
         if not candidate_endpoints:
             # Only add :latest suffix if model doesn't already have a version suffix
             if ":" not in model:
                 model = model + ":latest"
             candidate_endpoints = [
-                ep for ep, models in zip(config.endpoints, advertised_sets)
+                ep for ep, models in zip(all_endpoints, advertised_sets)
                 if model in models
             ]
         if not candidate_endpoints:
             raise RuntimeError(
-                f"None of the configured endpoints ({', '.join(config.endpoints)}) "
+                f"None of the configured endpoints ({', '.join(all_endpoints)}) "
                 f"advertise the model '{model}'."
             )
     # 3️⃣  Among the candidates, find those that have the model *loaded*
@@ -1311,13 +1402,13 @@ async def proxy(request: Request):
 
     
     endpoint = await choose_endpoint(model)
-    is_openai_endpoint = "/v1" in endpoint
-    if is_openai_endpoint:
+    use_openai = is_openai_compatible(endpoint)
+    if use_openai:
         if ":latest" in model:
             model = model.split(":latest")
             model = model[0]
         params = {
-            "prompt": prompt, 
+            "prompt": prompt,
             "model": model,
         }
 
@@ -1333,7 +1424,7 @@ async def proxy(request: Request):
             "suffix": suffix,
             }
         params.update({k: v for k, v in optional_params.items() if v is not None})
-        oclient = openai.AsyncOpenAI(base_url=endpoint, default_headers=default_headers, api_key=config.api_keys[endpoint])
+        oclient = openai.AsyncOpenAI(base_url=ep2base(endpoint), default_headers=default_headers, api_key=config.api_keys.get(endpoint, "no-key"))
     else:
         client = ollama.AsyncClient(host=endpoint)
     await increment_usage(endpoint, model)
@@ -1341,14 +1432,14 @@ async def proxy(request: Request):
     # 4. Async generator that streams data and decrements the counter
     async def stream_generate_response():
         try:
-            if is_openai_endpoint:
+            if use_openai:
                 start_ts = time.perf_counter()
                 async_gen = await oclient.completions.create(**params)
             else:
                 async_gen = await client.generate(model=model, prompt=prompt, suffix=suffix, system=system, template=template, context=context, stream=stream, think=think, raw=raw, format=_format, images=images, options=options, keep_alive=keep_alive)
             if stream == True:
                 async for chunk in async_gen:
-                    if is_openai_endpoint:
+                    if use_openai:
                         chunk = rechunk.openai_completion2ollama(chunk, stream, start_ts)
                     prompt_tok = chunk.prompt_eval_count or 0
                     comp_tok   = chunk.eval_count or 0
@@ -1360,7 +1451,7 @@ async def proxy(request: Request):
                         json_line = orjson.dumps(chunk)
                     yield json_line.encode("utf-8") + b"\n"
             else:
-                if is_openai_endpoint:
+                if use_openai:
                     response = rechunk.openai_completion2ollama(async_gen, stream, start_ts)
                     response = response.model_dump_json()
                 else:
@@ -1430,15 +1521,15 @@ async def chat_proxy(request: Request):
     else:
         opt = False
     endpoint = await choose_endpoint(model)
-    is_openai_endpoint = "/v1" in endpoint
-    if is_openai_endpoint:
+    use_openai = is_openai_compatible(endpoint)
+    if use_openai:
         if ":latest" in model:
             model = model.split(":latest")
             model = model[0]
         if messages:
             messages = transform_images_to_data_urls(messages)
         params = {
-            "messages": messages, 
+            "messages": messages,
             "model": model,
             }
         optional_params = {
@@ -1455,7 +1546,7 @@ async def chat_proxy(request: Request):
             "response_format": {"type": "json_schema", "json_schema": _format} if _format is not None else None
             }
         params.update({k: v for k, v in optional_params.items() if v is not None})
-        oclient = openai.AsyncOpenAI(base_url=endpoint, default_headers=default_headers, api_key=config.api_keys[endpoint])
+        oclient = openai.AsyncOpenAI(base_url=ep2base(endpoint), default_headers=default_headers, api_key=config.api_keys.get(endpoint, "no-key"))
     else:
         client = ollama.AsyncClient(host=endpoint)
     await increment_usage(endpoint, model)
@@ -1463,7 +1554,7 @@ async def chat_proxy(request: Request):
     async def stream_chat_response():
         try:
             # The chat method returns a generator of dicts (or GenerateResponse)
-            if is_openai_endpoint:
+            if use_openai:
                 start_ts = time.perf_counter()
                 async_gen = await oclient.chat.completions.create(**params)
             else:
@@ -1474,7 +1565,7 @@ async def chat_proxy(request: Request):
                     async_gen = await client.chat(model=model, messages=messages, tools=tools, stream=stream, think=think, format=_format, options=options, keep_alive=keep_alive)
             if stream == True:
                 async for chunk in async_gen:
-                    if is_openai_endpoint:
+                    if use_openai:
                         chunk = rechunk.openai_chat_completion2ollama(chunk, stream, start_ts)
                     # `chunk` can be a dict or a pydantic model – dump to JSON safely
                     prompt_tok = chunk.prompt_eval_count or 0
@@ -1487,7 +1578,7 @@ async def chat_proxy(request: Request):
                         json_line = orjson.dumps(chunk)
                     yield json_line.encode("utf-8") + b"\n"
             else:
-                if is_openai_endpoint:
+                if use_openai:
                     response = rechunk.openai_chat_completion2ollama(async_gen, stream, start_ts)
                     response = response.model_dump_json()
                 else:
@@ -1546,12 +1637,12 @@ async def embedding_proxy(request: Request):
 
     # 2. Endpoint logic
     endpoint = await choose_endpoint(model)
-    is_openai_endpoint = "/v1" in endpoint
-    if is_openai_endpoint:
+    use_openai = is_openai_compatible(endpoint)
+    if use_openai:
         if ":latest" in model:
             model = model.split(":latest")
             model = model[0]
-        client = openai.AsyncOpenAI(base_url=endpoint, api_key=config.api_keys[endpoint])
+        client = openai.AsyncOpenAI(base_url=ep2base(endpoint), api_key=config.api_keys.get(endpoint, "no-key"))
     else:
         client = ollama.AsyncClient(host=endpoint)
     await increment_usage(endpoint, model)
@@ -1559,7 +1650,7 @@ async def embedding_proxy(request: Request):
     async def stream_embedding_response():
         try:
             # The chat method returns a generator of dicts (or GenerateResponse)
-            if is_openai_endpoint:
+            if use_openai:
                 async_gen = await client.embeddings.create(input=prompt, model=model)
                 async_gen = rechunk.openai_embeddings2ollama(async_gen)
             else:
@@ -1612,12 +1703,12 @@ async def embed_proxy(request: Request):
 
     # 2. Endpoint logic
     endpoint = await choose_endpoint(model)
-    is_openai_endpoint = is_ext_openai_endpoint(endpoint) #"/v1" in endpoint
-    if is_openai_endpoint:
+    use_openai = is_openai_compatible(endpoint)
+    if use_openai:
         if ":latest" in model:
             model = model.split(":latest")
             model = model[0]
-        client = openai.AsyncOpenAI(base_url=endpoint, api_key=config.api_keys[endpoint])
+        client = openai.AsyncOpenAI(base_url=ep2base(endpoint), api_key=config.api_keys.get(endpoint, "no-key"))
     else:
         client = ollama.AsyncClient(host=endpoint)
     await increment_usage(endpoint, model)
@@ -1625,7 +1716,7 @@ async def embed_proxy(request: Request):
     async def stream_embedding_response():
         try:
             # The chat method returns a generator of dicts (or GenerateResponse)
-            if is_openai_endpoint:
+            if use_openai:
                 async_gen = await client.embeddings.create(input=_input, model=model)
                 async_gen = rechunk.openai_embed2ollama(async_gen, model)
             else:
@@ -2018,8 +2109,11 @@ async def tags_proxy(request: Request):
     # 1. Query all endpoints for models
     tasks = [fetch.endpoint_details(ep, "/api/tags", "models") for ep in config.endpoints if "/v1" not in ep]
     tasks += [fetch.endpoint_details(ep, "/models", "data", config.api_keys[ep]) for ep in config.endpoints if "/v1" in ep]
+    # Also query llama-server endpoints not already covered by config.endpoints
+    llama_eps_for_tags = [ep for ep in config.llama_server_endpoints if ep not in config.endpoints]
+    tasks += [fetch.endpoint_details(ep, "/models", "data", config.api_keys.get(ep)) for ep in llama_eps_for_tags]
     all_models = await asyncio.gather(*tasks)
-    
+
     models = {'models': []}
     for modellist in all_models:
         for model in modellist:
@@ -2045,18 +2139,47 @@ async def tags_proxy(request: Request):
 @app.get("/api/ps")
 async def ps_proxy(request: Request):
     """
-    Proxy a ps request to all Ollama endpoints and reply a unique list of all running models.
+    Proxy a ps request to all Ollama and llama-server endpoints and reply a unique list of all running models.
 
+    For Ollama endpoints: queries /api/ps
+    For llama-server endpoints: queries /v1/models with status.value == "loaded"
     """
-    # 1. Query all endpoints for running models
-    tasks = [fetch.endpoint_details(ep, "/api/ps", "models") for ep in config.endpoints if "/v1" not in ep]
-    loaded_models = await asyncio.gather(*tasks)
+    # 1. Query Ollama endpoints for running models via /api/ps
+    ollama_tasks = [fetch.endpoint_details(ep, "/api/ps", "models") for ep in config.endpoints if "/v1" not in ep]
+    # 2. Query llama-server endpoints for loaded models via /v1/models
+    # Also query endpoints from llama_server_endpoints that may not be in config.endpoints
+    all_llama_endpoints = set(config.llama_server_endpoints) | set(ep for ep in config.endpoints if ep in config.llama_server_endpoints)
+    llama_tasks = [
+        fetch.endpoint_details(ep, "/models", "data", config.api_keys.get(ep))
+        for ep in all_llama_endpoints
+    ]
+    
+    ollama_loaded = await asyncio.gather(*ollama_tasks) if ollama_tasks else []
+    llama_loaded = await asyncio.gather(*llama_tasks) if llama_tasks else []
 
     models = {'models': []}
-    for modellist in loaded_models:
-        models['models'] += modellist
+    # Add Ollama models (if any)
+    if ollama_loaded:
+        for modellist in ollama_loaded:
+            models['models'] += modellist
+    # Add llama-server models (filter for loaded only, if any)
+    if llama_loaded:
+        for modellist in llama_loaded:
+            loaded_models = [item for item in modellist if _is_llama_model_loaded(item)]
+            # Convert llama-server format to Ollama-like format for consistency
+            for item in loaded_models:
+                raw_id = item.get("id", "")
+                normalized = _normalize_llama_model_name(raw_id)
+                quant = _extract_llama_quant(raw_id)
+                models['models'].append({
+                    "name": normalized,
+                    "id": normalized,
+                    "digest": "",
+                    "status": item.get("status"),
+                    "details": {"quantization_level": quant} if quant else {}
+                })
     
-    # 2. Return a JSONResponse with deduplicated currently deployed models
+    # 3. Return a JSONResponse with deduplicated currently deployed models
     return JSONResponse(
         content={"models": dedupe_on_keys(models['models'], ['digest'])},
         status_code=200,
@@ -2068,19 +2191,63 @@ async def ps_proxy(request: Request):
 @app.get("/api/ps_details")
 async def ps_details_proxy(request: Request):
     """
-    Proxy a ps request to all Ollama endpoints and reply with per-endpoint instances.
+    Proxy a ps request to all Ollama and llama-server endpoints and reply with per-endpoint instances.
     This keeps /api/ps backward compatible while providing richer data.
+    
+    For Ollama endpoints: queries /api/ps
+    For llama-server endpoints: queries /v1/models with status info
     """
-    tasks = [(ep, fetch.endpoint_details(ep, "/api/ps", "models")) for ep in config.endpoints if "/v1" not in ep]
-    loaded_models = await asyncio.gather(*[task for _, task in tasks])
+    # 1. Query Ollama endpoints via /api/ps
+    ollama_tasks = [(ep, fetch.endpoint_details(ep, "/api/ps", "models")) for ep in config.endpoints if "/v1" not in ep]
+    # 2. Query llama-server endpoints via /v1/models
+    # Also query endpoints from llama_server_endpoints that may not be in config.endpoints
+    all_llama_endpoints = set(config.llama_server_endpoints) | set(ep for ep in config.endpoints if ep in config.llama_server_endpoints)
+    llama_tasks = [
+        (ep, fetch.endpoint_details(ep, "/models", "data", config.api_keys.get(ep)))
+        for ep in all_llama_endpoints
+    ]
+    
+    ollama_loaded = await asyncio.gather(*[task for _, task in ollama_tasks]) if ollama_tasks else []
+    llama_loaded = await asyncio.gather(*[task for _, task in llama_tasks]) if llama_tasks else []
 
     models: list[dict] = []
-    for (endpoint, modellist) in zip([ep for ep, _ in tasks], loaded_models):
-        for model in modellist:
-            if isinstance(model, dict):
-                model_with_endpoint = dict(model)
-                model_with_endpoint["endpoint"] = endpoint
-                models.append(model_with_endpoint)
+    
+    # Add Ollama models with endpoint info (if any)
+    if ollama_loaded:
+        for (endpoint, modellist) in zip([ep for ep, _ in ollama_tasks], ollama_loaded):
+            for model in modellist:
+                if isinstance(model, dict):
+                    model_with_endpoint = dict(model)
+                    model_with_endpoint["endpoint"] = endpoint
+                    models.append(model_with_endpoint)
+    
+    # Add llama-server models with endpoint info and full status metadata (if any)
+    if llama_loaded:
+        for (endpoint, modellist) in zip([ep for ep, _ in llama_tasks], llama_loaded):
+            # Filter for loaded models only
+            loaded_models = [item for item in modellist if _is_llama_model_loaded(item)]
+            for item in loaded_models:
+                if isinstance(item, dict) and item.get("id"):
+                    raw_id = item["id"]
+                    normalized = _normalize_llama_model_name(raw_id)
+                    quant = _extract_llama_quant(raw_id)
+                    model_with_endpoint = {
+                        "name": normalized,
+                        "id": normalized,
+                        "original_name": raw_id,
+                        "digest": "",
+                        "details": {"quantization_level": quant} if quant else {},
+                        "endpoint": endpoint,
+                        "status": item.get("status"),
+                        "created": item.get("created"),
+                        "owned_by": item.get("owned_by")
+                    }
+                    # Include full llama-server status details (args, preset)
+                    status_info = item.get("status", {})
+                    if isinstance(status_info, dict):
+                        model_with_endpoint["llama_status_args"] = status_info.get("args")
+                        model_with_endpoint["llama_status_preset"] = status_info.get("preset")
+                    models.append(model_with_endpoint)
 
     return JSONResponse(content={"models": models}, status_code=200)
 
@@ -2103,7 +2270,7 @@ async def usage_proxy(request: Request):
 async def config_proxy(request: Request):
     """
     Return a simple JSON object that contains the configured
-    Ollama endpoints. The front‑end uses this to display
+    Ollama endpoints and llama_server_endpoints. The front‑end uses this to display
     which endpoints are being proxied.
     """
     async def check_endpoint(url: str):
@@ -2127,9 +2294,17 @@ async def config_proxy(request: Request):
             detail = _format_connection_issue(target_url, e)
             return {"url": url, "status": "error", "detail": detail}
 
-    results = await asyncio.gather(*[check_endpoint(ep) for ep in config.endpoints])
+    # Check Ollama endpoints
+    ollama_results = await asyncio.gather(*[check_endpoint(ep) for ep in config.endpoints])
+    
+    # Check llama-server endpoints
+    llama_results = []
+    if config.llama_server_endpoints:
+        llama_results = await asyncio.gather(*[check_endpoint(ep) for ep in config.llama_server_endpoints])
+    
     return {
-        "endpoints": results,
+        "endpoints": ollama_results,
+        "llama_server_endpoints": llama_results,
         "require_router_api_key": bool(config.router_api_key),
     }
 
@@ -2164,8 +2339,8 @@ async def openai_embedding_proxy(request: Request):
     # 2. Endpoint logic
     endpoint = await choose_endpoint(model)
     await increment_usage(endpoint, model)
-    if "/v1" in endpoint: # and is_ext_openai_endpoint(endpoint):
-        api_key = config.api_keys[endpoint]
+    if is_openai_compatible(endpoint):
+        api_key = config.api_keys.get(endpoint, "no-key")
     else:
         api_key = "ollama"
     base_url = ep2base(endpoint)
@@ -2249,7 +2424,7 @@ async def openai_chat_completions_proxy(request: Request):
     endpoint = await choose_endpoint(model)
     await increment_usage(endpoint, model)
     base_url = ep2base(endpoint)
-    oclient = openai.AsyncOpenAI(base_url=base_url, default_headers=default_headers, api_key=config.api_keys[endpoint])
+    oclient = openai.AsyncOpenAI(base_url=base_url, default_headers=default_headers, api_key=config.api_keys.get(endpoint, "no-key"))
     # 3. Async generator that streams completions data and decrements the counter
     async def stream_ochat_response():
         try:
@@ -2374,7 +2549,7 @@ async def openai_completions_proxy(request: Request):
     endpoint = await choose_endpoint(model)
     await increment_usage(endpoint, model)
     base_url = ep2base(endpoint)
-    oclient = openai.AsyncOpenAI(base_url=base_url, default_headers=default_headers, api_key=config.api_keys[endpoint])
+    oclient = openai.AsyncOpenAI(base_url=base_url, default_headers=default_headers, api_key=config.api_keys.get(endpoint, "no-key"))
 
     # 3. Async generator that streams completions data and decrements the counter
     async def stream_ocompletions_response(model=model):
@@ -2430,22 +2605,46 @@ async def openai_completions_proxy(request: Request):
 @app.get("/v1/models")
 async def openai_models_proxy(request: Request):
     """
-    Proxy an OpenAI API models request to Ollama endpoints and reply with a unique list of all models.
-
+    Proxy an OpenAI API models request to Ollama and llama-server endpoints and reply with a unique list of models.
+    
+    For Ollama endpoints: queries /api/tags (all models)
+    For llama-server endpoints: queries /v1/models and filters for status.value == "loaded"
     """
-    # 1. Query all endpoints for models
-    tasks = [fetch.endpoint_details(ep, "/api/tags", "models") for ep in config.endpoints if "/v1" not in ep]
-    tasks += [fetch.endpoint_details(ep, "/models", "data", config.api_keys[ep]) for ep in config.endpoints if "/v1" in ep]
-    all_models = await asyncio.gather(*tasks)
+    # 1. Query Ollama endpoints for all models via /api/tags
+    ollama_tasks = [fetch.endpoint_details(ep, "/api/tags", "models") for ep in config.endpoints if "/v1" not in ep]
+    # 2. Query llama-server endpoints for loaded models via /v1/models
+    # Also query endpoints from llama_server_endpoints that may not be in config.endpoints
+    all_llama_endpoints = set(config.llama_server_endpoints) | set(ep for ep in config.endpoints if ep in config.llama_server_endpoints)
+    llama_tasks = [
+        fetch.endpoint_details(ep, "/models", "data", config.api_keys.get(ep))
+        for ep in all_llama_endpoints
+    ]
+    
+    ollama_models = await asyncio.gather(*ollama_tasks) if ollama_tasks else []
+    llama_models = await asyncio.gather(*llama_tasks) if llama_tasks else []
     
     models = {'data': []}
-    for modellist in all_models:
-        for model in modellist:
-            if not "id" in model.keys():  # Relable Ollama models with OpenAI Model.id from Model.name
-                model['id'] = model['name']
-            else:
-                model['name'] = model['id']
-        models['data'] += modellist
+    
+    # Add Ollama models (if any)
+    if ollama_models:
+        for modellist in ollama_models:
+            for model in modellist:
+                if not "id" in model.keys():  # Relable Ollama models with OpenAI Model.id from Model.name
+                    model['id'] = model.get('name', model.get('id', ''))
+                else:
+                    model['name'] = model['id']
+                models['data'].append(model)
+    
+    # Add llama-server models (filter for loaded only, if any)
+    if llama_models:
+        for modellist in llama_models:
+            loaded_models = [item for item in modellist if _is_llama_model_loaded(item)]
+            for model in loaded_models:
+                if not "id" in model.keys():
+                    model['id'] = model.get('name', model.get('id', ''))
+                else:
+                    model['name'] = model['id']
+                models['data'].append(model)
     
     # 2. Return a JSONResponse with a deduplicated list of unique models for inference
     return JSONResponse(
@@ -2556,6 +2755,7 @@ async def startup_event() -> None:
         print(
             f"Loaded configuration from {config_path}:\n"
             f" endpoints={config.endpoints},\n"
+            f" llama_server_endpoints={config.llama_server_endpoints},\n"
             f" max_concurrent_connections={config.max_concurrent_connections}"
         )
     else:
