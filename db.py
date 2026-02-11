@@ -50,7 +50,6 @@ class TokenDatabase:
                     PRIMARY KEY(endpoint, model)
                 )
             ''')
-            await db.execute('CREATE INDEX IF NOT EXISTS idx_token_time_series_timestamp ON token_time_series(timestamp)')
             await db.execute('''
                 CREATE TABLE IF NOT EXISTS token_time_series (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,6 +62,7 @@ class TokenDatabase:
                     FOREIGN KEY(endpoint, model) REFERENCES token_counts(endpoint, model)
                 )
             ''')
+            await db.execute('CREATE INDEX IF NOT EXISTS idx_token_time_series_timestamp ON token_time_series(timestamp)')
             await db.commit()
 
     async def update_token_counts(self, endpoint: str, model: str, input_tokens: int, output_tokens: int):
