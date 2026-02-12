@@ -22,7 +22,7 @@ multidict==6.6.4
 ollama==0.6.0
 openai==1.102.0
 orjson>=3.11.5
-pillow==11.3.0
+pillow==12.1.1
 propcache==0.3.2
 pydantic==2.11.7
 pydantic-settings==2.10.1
