@@ -2524,6 +2524,8 @@ async def openai_chat_completions_proxy(request: Request):
         max_tokens = payload.get("max_tokens")
         max_completion_tokens = payload.get("max_completion_tokens")
         tools = payload.get("tools")
+        logprobs = payload.get("logprobs")
+        top_logprobs = payload.get("top_logprobs")
 
         if ":latest" in model:
             model = model.split(":latest")
@@ -2547,6 +2549,8 @@ async def openai_chat_completions_proxy(request: Request):
             "frequency_penalty": frequency_penalty,
             "stop": stop,
             "stream": stream,
+            "logprobs": logprobs,
+            "top_logprobs": top_logprobs,
         }
 
         params.update({k: v for k, v in optional_params.items() if v is not None})
