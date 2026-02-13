@@ -1,40 +1,32 @@
-# Sample NOMYO Router Configuration
-
-# Basic single endpoint configuration
+# config.yaml
+# Ollama endpoints
 endpoints:
-  - http://localhost:11434
+  - http://192.168.0.50:11434
+  - http://192.168.0.51:11434
+  - http://192.168.0.52:11434
+  # External OpenAI-compatible endpoints (will NOT be queried for /api/ps /api/ps_details)
+  - https://api.openai.com/v1
 
+# llama-server endpoints (OpenAI-compatible with /v1/models status info)
+# These endpoints will be queried for /api/tags, /api/ps, /api/ps_details
+# and included in the model selection pool for inference routing
+llama_server_endpoints:
+  - http://localhost:8080/v1
+  - http://localhost:8081/v1
+
+# Maximum concurrent connections *per endpoint‑model pair* (equals to OLLAMA_NUM_PARALLEL)
 max_concurrent_connections: 2
 
-# Optional router-level API key to secure the router and dashboard (leave blank to disable)
+# Optional router-level API key that gates router/API/web UI access (leave empty to disable)
 nomyo-router-api-key: ""
 
-# Multi-endpoint configuration with local Ollama instances
-# endpoints:
-#   - http://ollama-worker1:11434
-#   - http://ollama-worker2:11434
-#   - http://ollama-worker3:11434
-
-# Mixed configuration with Ollama and OpenAI endpoints
-# endpoints:
-#   - http://localhost:11434
-#   - https://api.openai.com/v1
-
-
 # API keys for remote endpoints
-# Use ${VAR_NAME} syntax to reference environment variables
+# Set an environment variable like OPENAI_KEY
+# Confirm endpoints are exactly as in endpoints block
 api_keys:
-  # Local Ollama instances typically don't require authentication
-  "http://localhost:11434": "ollama"
-
-  # Remote Ollama instances
-  # "http://remote-ollama:11434": "ollama"
-
-  # OpenAI API
-  # "https://api.openai.com/v1": "${OPENAI_KEY}"
-
-  # Anthropic API
-  # "https://api.anthropic.com/v1": "${ANTHROPIC_KEY}"
-
-  # Other OpenAI-compatible endpoints
-  # "https://api.mistral.ai/v1": "${MISTRAL_KEY}"
+  "http://192.168.0.50:11434": "ollama"
+  "http://192.168.0.51:11434": "ollama"
+  "http://192.168.0.52:11434": "ollama"
+  "https://api.openai.com/v1": "${OPENAI_KEY}"
+  "http://localhost:8080/v1": "llama-server"  # Optional API key for llama-server
+  "http://localhost:8081/v1": "llama-server"

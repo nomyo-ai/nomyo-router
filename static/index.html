@@ -379,7 +379,7 @@
                             <th>Quant</th>
                             <th>Ctx</th>
                             <th>Size</th>
-                            <th>Until</th>
+                            <th>Unload</th>
                             <th>Digest</th>
                             <th>Tokens</th>
                         </tr>
@@ -683,7 +683,12 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
                         showApiKeyModal("Enter the NOMYO Router API key to load the dashboard.");
                     }
                     const body = document.getElementById("endpoints-body");
-                    body.innerHTML = data.endpoints
+                    
+                    // Build HTML for both endpoints and llama_server_endpoints
+                    let html = "";
+                    
+                    // Add Ollama endpoints
+                    html += data.endpoints
                         .map((e) => {
                             const statusClass =
                                 e.status === "ok"
@@ -698,6 +703,27 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
         </tr>`;
                         })
                         .join("");
+                    
+                    // Add llama-server endpoints
+                    if (data.llama_server_endpoints && data.llama_server_endpoints.length > 0) {
+                        html += data.llama_server_endpoints
+                            .map((e) => {
+                                const statusClass =
+                                    e.status === "ok"
+                                        ? "status-ok"
+                                        : "status-error";
+                                const version = e.version || "N/A";
+                                return `
+        <tr>
+          <td class="endpoint">${e.url}</td>
+          <td class="status ${statusClass}">${e.status}</td>
+          <td class="version">${version}</td>
+        </tr>`;
+                            })
+                            .join("");
+                    }
+                    
+                    body.innerHTML = html;
                 } catch (e) {
                     console.error(e);
                     const body = document.getElementById("endpoints-body");
@@ -837,7 +863,7 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
 
                     const formatUntil = (value) => {
                         if (value === null || value === undefined || value === "") {
-                            return "Forever";
+                            return "∞";
                         }
 
                         let targetTime;
@@ -898,10 +924,11 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
                             const params = modelInstances[0]?.details?.parameter_size ?? "";
                             const quant = modelInstances[0]?.details?.quantization_level ?? "";
                             const ctx = modelInstances[0]?.context_length ?? "";
+                            const originalName = modelInstances[0]?.original_name || modelName;
                             const uniqueEndpoints = Array.from(new Set(endpoints));
                             const endpointsData = encodeURIComponent(JSON.stringify(uniqueEndpoints));
                             return `<tr data-model="${modelName}" data-endpoints="${endpointsData}">
-                                <td class="model">${modelName} <a href="#" class="stats-link" data-model="${modelName}">stats</a></td>
+                                <td class="model">${modelName} <a href="#" class="stats-link" data-model="${originalName}">stats</a></td>
                                 <td>${renderInstanceList(endpoints)}</td>
                                 <td>${params}</td>
                                 <td>${quant}</td>
