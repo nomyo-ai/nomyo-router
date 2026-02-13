@@ -19,7 +19,7 @@ httpx==0.28.1
 idna==3.10
 jiter==0.10.0
 multidict==6.6.4
-ollama==0.6.0
+ollama==0.6.1
 openai==1.102.0
 orjson>=3.11.5
 pillow==12.1.1
