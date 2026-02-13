@@ -7,6 +7,10 @@ license: AGPL
 """
 # -------------------------------------------------------------
 import orjson, time, asyncio, yaml, ollama, openai, os, re, aiohttp, ssl, random, base64, io, enhance, secrets
+try:
+    import truststore; truststore.inject_into_ssl()
+except ImportError:
+    pass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -746,6 +750,7 @@ async def _make_chat_request(endpoint: str, model: str, messages: list, tools=No
     Handles endpoint selection, client creation, usage tracking, and request execution.
     """
     is_openai_endpoint = "/v1" in endpoint
+
     if is_openai_endpoint:
         if ":latest" in model:
             model = model.split(":latest")[0]
@@ -1262,6 +1267,7 @@ async def proxy(request: Request):
     
     endpoint = await choose_endpoint(model)
     is_openai_endpoint = "/v1" in endpoint
+
     if is_openai_endpoint:
         if ":latest" in model:
             model = model.split(":latest")
@@ -1381,6 +1387,7 @@ async def chat_proxy(request: Request):
         opt = False
     endpoint = await choose_endpoint(model)
     is_openai_endpoint = "/v1" in endpoint
+
     if is_openai_endpoint:
         if ":latest" in model:
             model = model.split(":latest")
@@ -1497,6 +1504,7 @@ async def embedding_proxy(request: Request):
     # 2. Endpoint logic
     endpoint = await choose_endpoint(model)
     is_openai_endpoint = "/v1" in endpoint
+
     if is_openai_endpoint:
         if ":latest" in model:
             model = model.split(":latest")
@@ -1563,6 +1571,7 @@ async def embed_proxy(request: Request):
     # 2. Endpoint logic
     endpoint = await choose_endpoint(model)
     is_openai_endpoint = is_ext_openai_endpoint(endpoint) #"/v1" in endpoint
+
     if is_openai_endpoint:
         if ":latest" in model:
             model = model.split(":latest")
@@ -1630,6 +1639,7 @@ async def create_proxy(request: Request):
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}") from e
     
     status_lists = []
+
     for endpoint in config.endpoints:
         client = ollama.AsyncClient(host=endpoint)
         create = await client.create(model=model, quantize=quantize, from_=from_, files=files, adapters=adapters, template=template, license=license, system=system, parameters=parameters, messages=messages, stream=False)
@@ -1669,6 +1679,7 @@ async def show_proxy(request: Request, model: Optional[str] = None):
     # 2. Endpoint logic
     endpoint = await choose_endpoint(model)
     #await increment_usage(endpoint, model)
+
     client = ollama.AsyncClient(host=endpoint)
 
     # 3. Proxy a simple show request
@@ -1802,6 +1813,7 @@ async def copy_proxy(request: Request, source: Optional[str] = None, destination
 
     # 3. Iterate over all endpoints to copy the model on each endpoint
     status_list = []
+
     for endpoint in config.endpoints:
         if "/v1" not in endpoint:
             client = ollama.AsyncClient(host=endpoint)
@@ -1838,6 +1850,7 @@ async def delete_proxy(request: Request, model: Optional[str] = None):
 
     # 2. Iterate over all endpoints to delete the model on each endpoint
     status_list = []
+
     for endpoint in config.endpoints:
         if "/v1" not in endpoint:
             client = ollama.AsyncClient(host=endpoint)
@@ -1876,6 +1889,7 @@ async def pull_proxy(request: Request, model: Optional[str] = None):
 
     # 2. Iterate over all endpoints to pull the model
     status_list = []
+
     for endpoint in config.endpoints:
         if "/v1" not in endpoint:
             client = ollama.AsyncClient(host=endpoint)
@@ -1917,6 +1931,7 @@ async def push_proxy(request: Request):
 
     # 2. Iterate over all endpoints
     status_list = []
+
     for endpoint in config.endpoints:
         client = ollama.AsyncClient(host=endpoint)
         # 3. Proxy a simple push request
@@ -2119,6 +2134,7 @@ async def openai_embedding_proxy(request: Request):
     else:
         api_key = "ollama"
     base_url = ep2base(endpoint)
+
     oclient = openai.AsyncOpenAI(base_url=base_url, default_headers=default_headers, api_key=api_key)
 
     # 3. Async generator that streams embedding data and decrements the counter
@@ -2199,6 +2215,7 @@ async def openai_chat_completions_proxy(request: Request):
     endpoint = await choose_endpoint(model)
     await increment_usage(endpoint, model)
     base_url = ep2base(endpoint)
+
     oclient = openai.AsyncOpenAI(base_url=base_url, default_headers=default_headers, api_key=config.api_keys[endpoint])
     # 3. Async generator that streams completions data and decrements the counter
     async def stream_ochat_response():
@@ -2324,6 +2341,7 @@ async def openai_completions_proxy(request: Request):
     endpoint = await choose_endpoint(model)
     await increment_usage(endpoint, model)
     base_url = ep2base(endpoint)
+
     oclient = openai.AsyncOpenAI(base_url=base_url, default_headers=default_headers, api_key=config.api_keys[endpoint])
 
     # 3. Async generator that streams completions data and decrements the counter
