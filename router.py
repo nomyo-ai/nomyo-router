@@ -183,6 +183,7 @@ def _config_path_from_env() -> Path:
         return Path(candidate).expanduser()
     return Path("config.yaml")
 
+from ollama._types import TokenLogprob, Logprob
 from db import TokenDatabase
 
 
@@ -1191,6 +1192,27 @@ def _build_ollama_tool_calls(accumulator: dict) -> list | None:
         ))
     return result
 
+def _convert_openai_logprobs(choice) -> list | None:
+    """Convert OpenAI logprobs from a choice into Ollama Logprob objects."""
+    lp = getattr(choice, "logprobs", None)
+    if lp is None:
+        return None
+    content = getattr(lp, "content", None)
+    if not content:
+        return None
+    result = []
+    for entry in content:
+        top = [
+            TokenLogprob(token=alt.token, logprob=alt.logprob)
+            for alt in (entry.top_logprobs or [])
+        ]
+        result.append(Logprob(
+            token=entry.token,
+            logprob=entry.logprob,
+            top_logprobs=top or None,
+        ))
+    return result
+
 class rechunk:
     def openai_chat_completion2ollama(chunk: dict, stream: bool, start_ts: float) -> ollama.ChatResponse:
         now = time.perf_counter()
@@ -1234,6 +1256,8 @@ class rechunk:
                     ollama_tool_calls.append(ollama.Message.ToolCall(
                         function=ollama.Message.ToolCall.Function(name=tc.function.name, arguments=args)
                     ))
+        # Convert OpenAI logprobs to Ollama format
+        ollama_logprobs = _convert_openai_logprobs(with_thinking) if with_thinking else None
         assistant_msg = ollama.Message(
             role=role,
             content=content,
@@ -1242,17 +1266,18 @@ class rechunk:
             tool_name=None,
             tool_calls=ollama_tool_calls)
         rechunk = ollama.ChatResponse(
-            model=chunk.model, 
+            model=chunk.model,
             created_at=iso8601_ns(),
             done=True if chunk.usage is not None else False,
             done_reason=chunk.choices[0].finish_reason, #if chunk.choices[0].finish_reason is not None else None,
             total_duration=int((now - start_ts) * 1_000_000_000) if chunk.usage is not None else 0,
-            load_duration=100000, 
+            load_duration=100000,
             prompt_eval_count=int(chunk.usage.prompt_tokens) if chunk.usage is not None else 0,
-            prompt_eval_duration=int((now - start_ts) * 1_000_000_000 * (chunk.usage.prompt_tokens / chunk.usage.completion_tokens / 100)) if chunk.usage is not None and chunk.usage.completion_tokens != 0 else 0, 
+            prompt_eval_duration=int((now - start_ts) * 1_000_000_000 * (chunk.usage.prompt_tokens / chunk.usage.completion_tokens / 100)) if chunk.usage is not None and chunk.usage.completion_tokens != 0 else 0,
             eval_count=int(chunk.usage.completion_tokens) if chunk.usage is not None else 0,
             eval_duration=int((now - start_ts) * 1_000_000_000) if chunk.usage is not None else 0,
-            message=assistant_msg)
+            message=assistant_msg,
+            logprobs=ollama_logprobs)
         return rechunk
     
     def openai_completion2ollama(chunk: dict, stream: bool, start_ts: float) -> ollama.GenerateResponse:
@@ -1598,6 +1623,8 @@ async def chat_proxy(request: Request):
         _format = payload.get("format")
         keep_alive = payload.get("keep_alive")
         options = payload.get("options")
+        logprobs = payload.get("logprobs")
+        top_logprobs = payload.get("top_logprobs")
 
         if not model:
             raise HTTPException(
@@ -1644,6 +1671,8 @@ async def chat_proxy(request: Request):
             "stop": options.get("stop") if options and "stop" in options else None,
             "top_p": options.get("top_p") if options and "top_p" in options else None,
             "temperature": options.get("temperature") if options and "temperature" in options else None,
+            "logprobs": logprobs if logprobs is not None else (options.get("logprobs") if options and "logprobs" in options else None),
+            "top_logprobs": top_logprobs if top_logprobs is not None else (options.get("top_logprobs") if options and "top_logprobs" in options else None),
             "response_format": {"type": "json_schema", "json_schema": _format} if _format is not None else None
             }
         params.update({k: v for k, v in optional_params.items() if v is not None})
@@ -1663,7 +1692,7 @@ async def chat_proxy(request: Request):
                     # Use the dedicated MOE helper function
                     async_gen = await _make_moe_requests(model, messages, tools, think, _format, options, keep_alive)
                 else:
-                    async_gen = await client.chat(model=model, messages=messages, tools=tools, stream=stream, think=think, format=_format, options=options, keep_alive=keep_alive)
+                    async_gen = await client.chat(model=model, messages=messages, tools=tools, stream=stream, think=think, format=_format, options=options, keep_alive=keep_alive, logprobs=logprobs, top_logprobs=top_logprobs)
             if stream == True:
                 tc_acc = {}  # accumulate OpenAI tool-call deltas across chunks
                 async for chunk in async_gen:
@@ -2495,6 +2524,8 @@ async def openai_chat_completions_proxy(request: Request):
         max_tokens = payload.get("max_tokens")
         max_completion_tokens = payload.get("max_completion_tokens")
         tools = payload.get("tools")
+        logprobs = payload.get("logprobs")
+        top_logprobs = payload.get("top_logprobs")
 
         if ":latest" in model:
             model = model.split(":latest")
@@ -2518,6 +2549,8 @@ async def openai_chat_completions_proxy(request: Request):
             "frequency_penalty": frequency_penalty,
             "stop": stop,
             "stream": stream,
+            "logprobs": logprobs,
+            "top_logprobs": top_logprobs,
         }
 
         params.update({k: v for k, v in optional_params.items() if v is not None})
@@ -2725,19 +2758,22 @@ async def openai_models_proxy(request: Request):
     """
     # 1. Query Ollama endpoints for all models via /api/tags
     ollama_tasks = [fetch.endpoint_details(ep, "/api/tags", "models") for ep in config.endpoints if "/v1" not in ep]
-    # 2. Query llama-server endpoints for loaded models via /v1/models
+    # 2. Query external OpenAI endpoints (Groq, OpenAI, etc.) via /models
+    ext_openai_tasks = [fetch.endpoint_details(ep, "/models", "data", config.api_keys.get(ep)) for ep in config.endpoints if is_ext_openai_endpoint(ep)]
+    # 3. Query llama-server endpoints for loaded models via /v1/models
     # Also query endpoints from llama_server_endpoints that may not be in config.endpoints
     all_llama_endpoints = set(config.llama_server_endpoints) | set(ep for ep in config.endpoints if ep in config.llama_server_endpoints)
     llama_tasks = [
         fetch.endpoint_details(ep, "/models", "data", config.api_keys.get(ep))
         for ep in all_llama_endpoints
     ]
-    
+
     ollama_models = await asyncio.gather(*ollama_tasks) if ollama_tasks else []
+    ext_openai_models = await asyncio.gather(*ext_openai_tasks) if ext_openai_tasks else []
     llama_models = await asyncio.gather(*llama_tasks) if llama_tasks else []
-    
+
     models = {'data': []}
-    
+
     # Add Ollama models (if any)
     if ollama_models:
         for modellist in ollama_models:
@@ -2747,12 +2783,21 @@ async def openai_models_proxy(request: Request):
                 else:
                     model['name'] = model['id']
                 models['data'].append(model)
-    
-    # Add llama-server models (filter for loaded only, if any)
+
+    # Add external OpenAI models (if any)
+    if ext_openai_models:
+        for modellist in ext_openai_models:
+            for model in modellist:
+                if not "id" in model.keys():
+                    model['id'] = model.get('name', model.get('id', ''))
+                else:
+                    model['name'] = model['id']
+                models['data'].append(model)
+
+    # Add llama-server models (all available, not just loaded)
     if llama_models:
         for modellist in llama_models:
-            loaded_models = [item for item in modellist if _is_llama_model_loaded(item)]
-            for model in loaded_models:
+            for model in modellist:
                 if not "id" in model.keys():
                     model['id'] = model.get('name', model.get('id', ''))
                 else:
