@@ -644,7 +644,7 @@ class fetch:
         # Check error cache with lock protection
         async with _available_error_cache_lock:
             if endpoint in _available_error_cache:
-                if _is_fresh(_available_error_cache[endpoint], 10):
+                if _is_fresh(_available_error_cache[endpoint], 30):
                     # Still within the short error TTL – pretend nothing is available
                     return set()
                 # Error expired – remove it
@@ -755,7 +755,7 @@ class fetch:
                 models, cached_at = _loaded_models_cache[endpoint]
 
                 # FRESH: < 10s old - return immediately
-                if _is_fresh(cached_at, 10):
+                if _is_fresh(cached_at, 30):
                     return models
 
                 # STALE: 10-60s old - return stale data and refresh in background
@@ -770,7 +770,7 @@ class fetch:
         # Check error cache with lock protection
         async with _loaded_error_cache_lock:
             if endpoint in _loaded_error_cache:
-                if _is_fresh(_loaded_error_cache[endpoint], 10):
+                if _is_fresh(_loaded_error_cache[endpoint], 30):
                     return set()
                 # Error expired - remove it
                 del _loaded_error_cache[endpoint]
@@ -795,16 +795,27 @@ class fetch:
                 if _inflight_loaded_models.get(endpoint) == task:
                     _inflight_loaded_models.pop(endpoint, None)
 
-    async def endpoint_details(endpoint: str, route: str, detail: str, api_key: Optional[str] = None) -> List[dict]:
+    async def endpoint_details(endpoint: str, route: str, detail: str, api_key: Optional[str] = None, skip_error_cache: bool = False) -> List[dict]:
         """
         Query <endpoint>/<route> to fetch <detail> and return a List of dicts with details
         for the corresponding Ollama endpoint. If the request fails we respond with "N/A" for detail.
+
+        When ``skip_error_cache`` is False (the default), the call is short-circuited
+        if the endpoint recently failed (recorded in ``_available_error_cache``).
+        Pass ``skip_error_cache=True`` from health-check routes that must always probe.
         """
+        # Fast-fail if the endpoint is known to be down (unless caller opts out)
+        if not skip_error_cache:
+            async with _available_error_cache_lock:
+                if endpoint in _available_error_cache:
+                    if _is_fresh(_available_error_cache[endpoint], 30):
+                        return []
+
         client: aiohttp.ClientSession = app_state["session"]
         headers = None
         if api_key is not None:
             headers = {"Authorization": "Bearer " + api_key}
-        
+
         request_url = f"{endpoint}{route}"
         try:
             async with client.get(request_url, headers=headers) as resp:
@@ -816,6 +827,9 @@ class fetch:
             # If anything goes wrong we cannot reply details
             message = _format_connection_issue(request_url, e)
             print(f"[fetch.endpoint_details] {message}")
+            # Record failure so subsequent calls skip this endpoint briefly
+            async with _available_error_cache_lock:
+                _available_error_cache[endpoint] = time.time()
             return []
 
 def ep2base(ep):
@@ -2778,7 +2792,7 @@ async def health_proxy(request: Request):
     * The HTTP status code is 200 when everything is healthy, 503 otherwise.
     """
     # Run all health checks in parallel
-    tasks = [fetch.endpoint_details(ep, "/api/version", "version") for ep in config.endpoints] # if not is_ext_openai_endpoint(ep)]
+    tasks = [fetch.endpoint_details(ep, "/api/version", "version", skip_error_cache=True) for ep in config.endpoints] # if not is_ext_openai_endpoint(ep)]
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
