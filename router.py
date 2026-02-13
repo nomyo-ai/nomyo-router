@@ -2758,19 +2758,22 @@ async def openai_models_proxy(request: Request):
     """
     # 1. Query Ollama endpoints for all models via /api/tags
     ollama_tasks = [fetch.endpoint_details(ep, "/api/tags", "models") for ep in config.endpoints if "/v1" not in ep]
-    # 2. Query llama-server endpoints for loaded models via /v1/models
+    # 2. Query external OpenAI endpoints (Groq, OpenAI, etc.) via /models
+    ext_openai_tasks = [fetch.endpoint_details(ep, "/models", "data", config.api_keys.get(ep)) for ep in config.endpoints if is_ext_openai_endpoint(ep)]
+    # 3. Query llama-server endpoints for loaded models via /v1/models
     # Also query endpoints from llama_server_endpoints that may not be in config.endpoints
     all_llama_endpoints = set(config.llama_server_endpoints) | set(ep for ep in config.endpoints if ep in config.llama_server_endpoints)
     llama_tasks = [
         fetch.endpoint_details(ep, "/models", "data", config.api_keys.get(ep))
         for ep in all_llama_endpoints
     ]
-    
+
     ollama_models = await asyncio.gather(*ollama_tasks) if ollama_tasks else []
+    ext_openai_models = await asyncio.gather(*ext_openai_tasks) if ext_openai_tasks else []
     llama_models = await asyncio.gather(*llama_tasks) if llama_tasks else []
-    
+
     models = {'data': []}
-    
+
     # Add Ollama models (if any)
     if ollama_models:
         for modellist in ollama_models:
@@ -2780,12 +2783,21 @@ async def openai_models_proxy(request: Request):
                 else:
                     model['name'] = model['id']
                 models['data'].append(model)
-    
-    # Add llama-server models (filter for loaded only, if any)
+
+    # Add external OpenAI models (if any)
+    if ext_openai_models:
+        for modellist in ext_openai_models:
+            for model in modellist:
+                if not "id" in model.keys():
+                    model['id'] = model.get('name', model.get('id', ''))
+                else:
+                    model['name'] = model['id']
+                models['data'].append(model)
+
+    # Add llama-server models (all available, not just loaded)
     if llama_models:
         for modellist in llama_models:
-            loaded_models = [item for item in modellist if _is_llama_model_loaded(item)]
-            for model in loaded_models:
+            for model in modellist:
                 if not "id" in model.keys():
                     model['id'] = model.get('name', model.get('id', ''))
                 else:
