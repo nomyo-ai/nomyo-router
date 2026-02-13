@@ -1,7 +1,7 @@
 # config.yaml
-# Ollama endpoints
+# Ollama endpoints local + remote
 endpoints:
-  - http://192.168.0.50:11434
+  - http://localhost:11434
   - http://192.168.0.51:11434
   - http://192.168.0.52:11434
   # External OpenAI-compatible endpoints (will NOT be queried for /api/ps /api/ps_details)
@@ -12,7 +12,7 @@ endpoints:
 # and included in the model selection pool for inference routing
 llama_server_endpoints:
   - http://localhost:8080/v1
-  - http://localhost:8081/v1
+  - http://192.168.0.33:8081/v1
 
 # Maximum concurrent connections *per endpoint‑model pair* (equals to OLLAMA_NUM_PARALLEL)
 max_concurrent_connections: 2
@@ -28,5 +28,5 @@ api_keys:
   "http://192.168.0.51:11434": "ollama"
   "http://192.168.0.52:11434": "ollama"
   "https://api.openai.com/v1": "${OPENAI_KEY}"
-  "http://localhost:8080/v1": "llama-server"  # Optional API key for llama-server
-  "http://localhost:8081/v1": "llama-server"
+  "http://localhost:8080/v1": "llama-server"  # Optional API key for llama-server - depends on llama_server config
+  "http://192.168.0.33:8081/v1": "llama-server"
