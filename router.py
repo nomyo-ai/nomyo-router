@@ -785,7 +785,7 @@ class fetch:
                 models, cached_at = _loaded_models_cache[endpoint]
 
                 # FRESH: < 10s old - return immediately
-                if _is_fresh(cached_at, 300):
+                if _is_fresh(cached_at, 10):
                     return models
 
                 # STALE: 10-60s old - return stale data and refresh in background
