@@ -2430,6 +2430,10 @@ async def ps_details_proxy(request: Request):
     
     # Add llama-server models with endpoint info and full status metadata (if any)
     if llama_loaded:
+        # Collect (endpoint, raw_id) pairs to fetch /props in parallel
+        props_requests: list[tuple[str, str]] = []
+        llama_models_pending: list[dict] = []
+
         for (endpoint, modellist) in zip([ep for ep, _ in llama_tasks], llama_loaded):
             # Filter for loaded models only
             loaded_models = [item for item in modellist if _is_llama_model_loaded(item)]
@@ -2454,7 +2458,53 @@ async def ps_details_proxy(request: Request):
                     if isinstance(status_info, dict):
                         model_with_endpoint["llama_status_args"] = status_info.get("args")
                         model_with_endpoint["llama_status_preset"] = status_info.get("preset")
-                    models.append(model_with_endpoint)
+                    llama_models_pending.append(model_with_endpoint)
+                    props_requests.append((endpoint, raw_id))
+
+        # Fetch /props for each llama-server model to get context length (n_ctx)
+        # and unload sleeping models automatically
+        async def _fetch_llama_props(endpoint: str, model_id: str) -> tuple[int | None, bool]:
+            client: aiohttp.ClientSession = app_state["session"]
+            base_url = endpoint.rstrip("/").removesuffix("/v1")
+            props_url = f"{base_url}/props?model={model_id}"
+            headers = None
+            api_key = config.api_keys.get(endpoint)
+            if api_key:
+                headers = {"Authorization": f"Bearer {api_key}"}
+            try:
+                async with client.get(props_url, headers=headers) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        dgs = data.get("default_generation_settings", {})
+                        n_ctx = dgs.get("n_ctx")
+                        is_sleeping = data.get("is_sleeping", False)
+
+                        if is_sleeping:
+                            unload_url = f"{base_url}/models/unload"
+                            try:
+                                async with client.post(
+                                    unload_url,
+                                    json={"model": model_id},
+                                    headers=headers,
+                                ) as unload_resp:
+                                    print(f"[ps_details] Unloaded sleeping model {model_id} from {endpoint}: {unload_resp.status}")
+                            except Exception as ue:
+                                print(f"[ps_details] Failed to unload sleeping model {model_id} from {endpoint}: {ue}")
+
+                        return n_ctx, is_sleeping
+            except Exception as e:
+                print(f"[ps_details] Failed to fetch props from {props_url}: {e}")
+            return None, False
+
+        props_results = await asyncio.gather(
+            *[_fetch_llama_props(ep, mid) for ep, mid in props_requests]
+        )
+
+        for model_dict, (n_ctx, is_sleeping) in zip(llama_models_pending, props_results):
+            if n_ctx is not None:
+                model_dict["context_length"] = n_ctx
+            if not is_sleeping:
+                models.append(model_dict)
 
     return JSONResponse(content={"models": models}, status_code=200)
 
@@ -2659,7 +2709,14 @@ async def openai_chat_completions_proxy(request: Request):
                         else orjson.dumps(chunk)
                     )
                     if chunk.choices:
-                        if chunk.choices[0].delta.content is not None:
+                        delta = chunk.choices[0].delta
+                        has_content = delta.content is not None
+                        has_reasoning = (
+                            getattr(delta, "reasoning_content", None) is not None
+                            or getattr(delta, "reasoning", None) is not None
+                        )
+                        has_tool_calls = getattr(delta, "tool_calls", None) is not None
+                        if has_content or has_reasoning or has_tool_calls:
                             yield f"data: {data}\n\n".encode("utf-8")
                     elif chunk.usage is not None:
                         # Forward the usage-only final chunk (e.g. from llama-server)
@@ -2792,7 +2849,13 @@ async def openai_completions_proxy(request: Request):
                         else orjson.dumps(chunk)
                     )
                     if chunk.choices:
-                        if chunk.choices[0].finish_reason == None:
+                        choice = chunk.choices[0]
+                        has_text = getattr(choice, "text", None) is not None
+                        has_reasoning = (
+                            getattr(choice, "reasoning_content", None) is not None
+                            or getattr(choice, "reasoning", None) is not None
+                        )
+                        if has_text or has_reasoning or choice.finish_reason is not None:
                             yield f"data: {data}\n\n".encode("utf-8")
                     elif chunk.usage is not None:
                         # Forward the usage-only final chunk (e.g. from llama-server)
