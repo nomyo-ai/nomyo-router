@@ -2684,7 +2684,16 @@ async def openai_chat_completions_proxy(request: Request):
 
     # 2. Endpoint logic
     endpoint = await choose_endpoint(model)
-    await increment_usage(endpoint, model)
+    # Normalize model name for tracking so it matches the PS table key:
+    #  - Ollama: PS reports "model:latest" → append ":latest" when missing
+    #  - llama-server: PS reports _normalize_llama_model_name(id) → strip HF prefix/quant
+    #  - External OpenAI: not shown in PS, keep as-is
+    tracking_model = model
+    if endpoint in config.llama_server_endpoints:
+        tracking_model = _normalize_llama_model_name(model)
+    elif not is_ext_openai_endpoint(endpoint) and ":" not in model:
+        tracking_model = model + ":latest"
+    await increment_usage(endpoint, tracking_model)
     base_url = ep2base(endpoint)
     oclient = openai.AsyncOpenAI(base_url=base_url, default_headers=default_headers, api_key=config.api_keys.get(endpoint, "no-key"))
     # 3. Async generator that streams completions data and decrements the counter
@@ -2731,11 +2740,7 @@ async def openai_chat_completions_proxy(request: Request):
                         if llama_usage:
                             prompt_tok, comp_tok = llama_usage
                     if prompt_tok != 0 or comp_tok != 0:
-                        local_model = model
-                        if not is_ext_openai_endpoint(endpoint):
-                            if not ":" in model:
-                                local_model = model if ":" in model else model + ":latest"
-                        await token_queue.put((endpoint, local_model, prompt_tok, comp_tok))
+                        await token_queue.put((endpoint, tracking_model, prompt_tok, comp_tok))
                 yield b"data: [DONE]\n\n"
             else:
                 prompt_tok = 0
@@ -2748,7 +2753,7 @@ async def openai_chat_completions_proxy(request: Request):
                     if llama_usage:
                         prompt_tok, comp_tok = llama_usage
                 if prompt_tok != 0 or comp_tok != 0:
-                    await token_queue.put((endpoint, model, prompt_tok, comp_tok))
+                    await token_queue.put((endpoint, tracking_model, prompt_tok, comp_tok))
                 json_line = (
                     async_gen.model_dump_json()
                     if hasattr(async_gen, "model_dump_json")
@@ -2758,7 +2763,7 @@ async def openai_chat_completions_proxy(request: Request):
 
         finally:
             # Ensure counter is decremented even if an exception occurs
-            await decrement_usage(endpoint, model)
+            await decrement_usage(endpoint, tracking_model)
 
     # 4. Return a StreamingResponse backed by the generator
     return StreamingResponse(
@@ -2832,7 +2837,16 @@ async def openai_completions_proxy(request: Request):
 
     # 2. Endpoint logic
     endpoint = await choose_endpoint(model)
-    await increment_usage(endpoint, model)
+    # Normalize model name for tracking so it matches the PS table key:
+    #  - Ollama: PS reports "model:latest" → append ":latest" when missing
+    #  - llama-server: PS reports _normalize_llama_model_name(id) → strip HF prefix/quant
+    #  - External OpenAI: not shown in PS, keep as-is
+    tracking_model = model
+    if endpoint in config.llama_server_endpoints:
+        tracking_model = _normalize_llama_model_name(model)
+    elif not is_ext_openai_endpoint(endpoint) and ":" not in model:
+        tracking_model = model + ":latest"
+    await increment_usage(endpoint, tracking_model)
     base_url = ep2base(endpoint)
     oclient = openai.AsyncOpenAI(base_url=base_url, default_headers=default_headers, api_key=config.api_keys.get(endpoint, "no-key"))
 
@@ -2870,11 +2884,7 @@ async def openai_completions_proxy(request: Request):
                         if llama_usage:
                             prompt_tok, comp_tok = llama_usage
                     if prompt_tok != 0 or comp_tok != 0:
-                        local_model = model
-                        if not is_ext_openai_endpoint(endpoint):
-                            if not ":" in model:
-                                local_model = model if ":" in model else model + ":latest"
-                        await token_queue.put((endpoint, local_model, prompt_tok, comp_tok))
+                        await token_queue.put((endpoint, tracking_model, prompt_tok, comp_tok))
                 # Final DONE event
                 yield b"data: [DONE]\n\n"
             else:
@@ -2888,7 +2898,7 @@ async def openai_completions_proxy(request: Request):
                     if llama_usage:
                         prompt_tok, comp_tok = llama_usage
                 if prompt_tok != 0 or comp_tok != 0:
-                    await token_queue.put((endpoint, model, prompt_tok, comp_tok))
+                    await token_queue.put((endpoint, tracking_model, prompt_tok, comp_tok))
                 json_line = (
                     async_gen.model_dump_json()
                     if hasattr(async_gen, "model_dump_json")
@@ -2898,7 +2908,7 @@ async def openai_completions_proxy(request: Request):
 
         finally:
             # Ensure counter is decremented even if an exception occurs
-            await decrement_usage(endpoint, model)
+            await decrement_usage(endpoint, tracking_model)
 
     # 4. Return a StreamingResponse backed by the generator
     return StreamingResponse(

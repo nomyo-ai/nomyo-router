@@ -928,7 +928,7 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
                             const uniqueEndpoints = Array.from(new Set(endpoints));
                             const endpointsData = encodeURIComponent(JSON.stringify(uniqueEndpoints));
                             return `<tr data-model="${modelName}" data-endpoints="${endpointsData}">
-                                <td class="model">${modelName} <a href="#" class="stats-link" data-model="${originalName}">stats</a></td>
+                                <td class="model">${modelName} <a href="#" class="stats-link" data-model="${modelName}">stats</a></td>
                                 <td>${renderInstanceList(endpoints)}</td>
                                 <td>${params}</td>
                                 <td>${quant}</td>
