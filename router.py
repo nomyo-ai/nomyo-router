@@ -2292,7 +2292,13 @@ async def version_proxy(request: Request):
     """
     # 1. Query all endpoints for version
     tasks = [fetch.endpoint_details(ep, "/api/version", "version") for ep in config.endpoints if "/v1" not in ep]
-    all_versions = await asyncio.gather(*tasks)
+    all_versions_raw = await asyncio.gather(*tasks)
+
+    # Filter out non-string values (e.g., empty lists from failed/timeout responses)
+    all_versions = [v for v in all_versions_raw if isinstance(v, str) and v]
+
+    if not all_versions:
+        raise HTTPException(status_code=503, detail="No valid version response from any endpoint")
 
     def version_key(v):
         return tuple(map(int, v.split('.')))
