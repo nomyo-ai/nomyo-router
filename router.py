@@ -1536,11 +1536,11 @@ async def choose_endpoint(model: str) -> str:
         ]
 
         if loaded_and_free:
-            # Sort by per-model usage in DESCENDING order to ensure model affinity
-            # Endpoints with higher usage (already handling this model) should be preferred
-            # until they reach max_concurrent_connections
+            # Sort by per-model usage in ASCENDING order for load balancing.
+            # All endpoints in this set already have the model loaded, so there is
+            # no model-switching cost to avoid — prefer the least-busy endpoint.
             loaded_and_free.sort(
-                key=lambda ep: -usage_counts.get(ep, {}).get(model, 0)  # Negative for descending order
+                key=lambda ep: usage_counts.get(ep, {}).get(model, 0)
             )
 
             # If all endpoints have zero usage for this model, randomize to distribute
