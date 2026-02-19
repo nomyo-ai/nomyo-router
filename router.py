@@ -1525,27 +1525,26 @@ async def choose_endpoint(model: str) -> str:
 
     # Protect all reads of usage_counts with the lock
     async with usage_lock:
-        # Helper: get current usage count for (endpoint, model)
-        def current_usage(ep: str) -> int:
-            return usage_counts.get(ep, {}).get(model, 0)
+        # Helper: current usage for (endpoint, model) using the same normalized key
+        # that increment_usage/decrement_usage store — raw model names differ from
+        # tracking names for llama-server (HF prefix / quant suffix stripped).
+        def tracking_usage(ep: str) -> int:
+            return usage_counts.get(ep, {}).get(get_tracking_model(ep, model), 0)
 
         # 3️⃣ Endpoints that have the model loaded *and* a free slot
         loaded_and_free = [
             ep for ep, models in zip(candidate_endpoints, loaded_sets)
-            if model in models and usage_counts.get(ep, {}).get(model, 0) < config.max_concurrent_connections
+            if model in models and tracking_usage(ep) < config.max_concurrent_connections
         ]
 
         if loaded_and_free:
-            # Sort by per-model usage in ASCENDING order for load balancing.
-            # All endpoints in this set already have the model loaded, so there is
-            # no model-switching cost to avoid — prefer the least-busy endpoint.
-            loaded_and_free.sort(
-                key=lambda ep: usage_counts.get(ep, {}).get(model, 0)
-            )
+            # Sort ascending for load balancing — all endpoints here already have the
+            # model loaded, so there is no model-switching cost to optimise for.
+            loaded_and_free.sort(key=tracking_usage)
 
-            # If all endpoints have zero usage for this model, randomize to distribute
-            # different models across different endpoints for better resource utilization
-            if all(usage_counts.get(ep, {}).get(model, 0) == 0 for ep in loaded_and_free):
+            # When all candidates are equally idle, randomise to avoid always picking
+            # the first entry in a stable sort.
+            if all(tracking_usage(ep) == 0 for ep in loaded_and_free):
                 return random.choice(loaded_and_free)
 
             return loaded_and_free[0]
@@ -1553,30 +1552,22 @@ async def choose_endpoint(model: str) -> str:
         # 4️⃣ Endpoints among the candidates that simply have a free slot
         endpoints_with_free_slot = [
             ep for ep in candidate_endpoints
-            if usage_counts.get(ep, {}).get(model, 0) < config.max_concurrent_connections
+            if tracking_usage(ep) < config.max_concurrent_connections
         ]
 
         if endpoints_with_free_slot:
-            # Sort by per-model usage (descending) first to ensure model affinity
-            # Even if the model isn't showing as "loaded" in /api/ps yet (e.g., during initial loading),
-            # we want to send subsequent requests to the endpoint that already has connections for this model
-            # Then by total endpoint usage (ascending) to balance idle endpoints
+            # Sort by total endpoint load (ascending) to prefer idle endpoints.
             endpoints_with_free_slot.sort(
-                key=lambda ep: (
-                    #-usage_counts.get(ep, {}).get(model, 0),  # Primary: per-model usage (descending - prefer endpoints with connections)
-                    sum(usage_counts.get(ep, {}).values())    # Secondary: total endpoint usage (ascending - prefer idle endpoints)
-                )
+                key=lambda ep: sum(usage_counts.get(ep, {}).values())
             )
 
-            # If all endpoints have zero usage for this specific model, randomize to distribute
-            # different models across different endpoints for better resource utilization
-            if all(usage_counts.get(ep, {}).get(model, 0) == 0 for ep in endpoints_with_free_slot):
+            if all(tracking_usage(ep) == 0 for ep in endpoints_with_free_slot):
                 return random.choice(endpoints_with_free_slot)
 
             return endpoints_with_free_slot[0]
 
-        # 5️⃣ All candidate endpoints are saturated – pick one with lowest usages count (will queue)
-        ep = min(candidate_endpoints, key=current_usage)
+        # 5️⃣ All candidate endpoints are saturated – pick the least-busy one (will queue)
+        ep = min(candidate_endpoints, key=tracking_usage)
         return ep
 
 # -------------------------------------------------------------
