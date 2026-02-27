@@ -2,11 +2,11 @@
 title: NOMYO Router - an Ollama Proxy with Endpoint:Model aware routing
 author: alpha-nerd-nomyo
 author_url: https://github.com/nomyo-ai
-version: 0.6
+version: 0.7
 license: AGPL
 """
 # -------------------------------------------------------------
-import orjson, time, asyncio, yaml, ollama, openai, os, re, aiohttp, ssl, random, base64, io, enhance, secrets
+import orjson, time, asyncio, yaml, ollama, openai, os, re, aiohttp, ssl, random, base64, io, enhance, secrets, math
 try:
     import truststore; truststore.inject_into_ssl()
 except ImportError:
@@ -2637,13 +2637,16 @@ async def openai_embedding_proxy(request: Request):
 
     oclient = openai.AsyncOpenAI(base_url=base_url, default_headers=default_headers, api_key=api_key)
 
-    # 3. Async generator that streams embedding data and decrements the counter
-    async_gen = await oclient.embeddings.create(input=doc, model=model)
-
-    await decrement_usage(endpoint, tracking_model)
-
-    # 5. Return a StreamingResponse backed by the generator
-    return async_gen
+    try:
+        async_gen = await oclient.embeddings.create(input=doc, model=model)
+        result = async_gen.model_dump()
+        for item in result.get("data", []):
+            emb = item.get("embedding")
+            if emb:
+                item["embedding"] = [0.0 if isinstance(v, float) and not math.isfinite(v) else v for v in emb]
+        return JSONResponse(content=result)
+    finally:
+        await decrement_usage(endpoint, tracking_model)
 
 # -------------------------------------------------------------
 # 22. API route – OpenAI compatible Chat Completions
