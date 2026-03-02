@@ -374,8 +374,11 @@ def _extract_llama_quant(name: str) -> str:
 
 def _is_llama_model_loaded(item: dict) -> bool:
     """Return True if a llama-server /v1/models item has status 'loaded'.
-    Handles both dict format ({"value": "loaded"}) and plain string ("loaded")."""
+    Handles both dict format ({"value": "loaded"}) and plain string ("loaded").
+    If no status field is present, the model is always-loaded (not dynamically managed)."""
     status = item.get("status")
+    if status is None:
+        return True  # No status field: model is always loaded (e.g. single-model servers)
     if isinstance(status, dict):
         return status.get("value") == "loaded"
     if isinstance(status, str):
