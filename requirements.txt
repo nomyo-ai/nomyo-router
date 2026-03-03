@@ -36,5 +36,6 @@ tqdm==4.67.1
 typing-inspection==0.4.1
 typing_extensions==4.14.1
 uvicorn==0.38.0
+uvloop
 yarl==1.20.1
 aiosqlite

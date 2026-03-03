@@ -14,11 +14,16 @@ Copy/Clone the repository, edit the config.yaml by adding your Ollama backend se
 
 ```
 # config.yaml
+# Ollama or OpenAI API V1 endpoints
 endpoints:
   - http://ollama0:11434
   - http://ollama1:11434
   - http://ollama2:11434
   - https://api.openai.com/v1
+
+# llama.cpp server endpoints
+llama_server_endpoints:
+  - http://192.168.0.33:8889/v1
 
 # Maximum concurrent connections *per endpoint‑model pair*
 max_concurrent_connections: 2
@@ -34,6 +39,7 @@ api_keys:
   "http://192.168.0.51:11434": "ollama"
   "http://192.168.0.52:11434": "ollama"
   "https://api.openai.com/v1": "${OPENAI_KEY}"
+  "http://192.168.0.33:8889/v1": "llama"
 ```
 
 Run the NOMYO Router in a dedicated virtual environment, install the requirements and run with uvicorn:
@@ -56,6 +62,12 @@ finally you can
 
 ```
 uvicorn router:app --host 127.0.0.1 --port 12434
+```
+
+in <u>very</u> high concurrent scenarios (> 500 simultaneous requests) you can also run with uvloop
+
+```
+uvicorn router:app --host 127.0.0.1 --port 12434 --loop uvloop
 ```
 
 ## Docker Deployment
@@ -98,7 +110,6 @@ This way the Ollama backend servers are utilized more efficient than by simply u
 
 NOMYO Router also supports OpenAI API compatible v1 backend servers.
 
-
 ## Supplying the router API key
 
 If you set `nomyo-router-api-key` in `config.yaml` (or `NOMYO_ROUTER_API_KEY` env), every request to NOMYO Router must include the key:
@@ -107,6 +118,7 @@ If you set `nomyo-router-api-key` in `config.yaml` (or `NOMYO_ROUTER_API_KEY` en
 - Query param (fallback): `?api_key=<router_key>`
 
 Examples:
+
 ```bash
 curl -H "Authorization: Bearer $NOMYO_ROUTER_API_KEY" http://localhost:12434/api/tags
 curl "http://localhost:12434/api/tags?api_key=$NOMYO_ROUTER_API_KEY"
