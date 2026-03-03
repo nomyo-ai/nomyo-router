@@ -75,7 +75,7 @@ def _mask_secrets(text: str) -> str:
         return text
     # OpenAI-style keys (sk-...) and generic "api key" mentions
     text = re.sub(r"sk-[A-Za-z0-9]{4}[A-Za-z0-9_-]*", "sk-***redacted***", text)
-    text = re.sub(r"(?i)(api[-_ ]key\\s*[:=]\\s*)([^\\s]+)", r"\\1***redacted***", text)
+    text = re.sub(r"(?i)(api[-_ ]key\s*[:=]\s*)([^\s]+)", r"\1***redacted***", text)
     return text
 
 # ------------------------------------------------------------------
@@ -2393,8 +2393,10 @@ async def ps_proxy(request: Request):
                 })
     
     # 3. Return a JSONResponse with deduplicated currently deployed models
+    # Deduplicate on 'name' rather than 'digest': llama-server models always
+    # have digest="" so deduping on digest collapses all of them to one entry.
     return JSONResponse(
-        content={"models": dedupe_on_keys(models['models'], ['digest'])},
+        content={"models": dedupe_on_keys(models['models'], ['name'])},
         status_code=200,
     )
 
@@ -2540,7 +2542,7 @@ async def config_proxy(request: Request):
         client: aiohttp.ClientSession = app_state["session"]
         headers = None
         if "/v1" in url:
-            headers = {"Authorization": "Bearer " + config.api_keys[url]}
+            headers = {"Authorization": "Bearer " + config.api_keys.get(url, "no-key")}
             target_url = f"{url}/models"
         else:
             target_url = f"{url}/api/version"
@@ -2651,12 +2653,21 @@ async def openai_chat_completions_proxy(request: Request):
         logprobs = payload.get("logprobs")
         top_logprobs = payload.get("top_logprobs")
 
+        if not model:
+            raise HTTPException(
+                status_code=400, detail="Missing required field 'model'"
+            )
+        if not isinstance(messages, list):
+            raise HTTPException(
+                status_code=400, detail="Missing required field 'messages' (must be a list)"
+            )
+
         if ":latest" in model:
             model = model.split(":latest")
             model = model[0]
 
         params = {
-            "messages": messages, 
+            "messages": messages,
             "model": model,
         }
 
@@ -2678,15 +2689,6 @@ async def openai_chat_completions_proxy(request: Request):
         }
 
         params.update({k: v for k, v in optional_params.items() if v is not None})
-        
-        if not model:
-            raise HTTPException(
-                status_code=400, detail="Missing required field 'model'"
-            )
-        if not isinstance(messages, list):
-            raise HTTPException(
-                status_code=400, detail="Missing required field 'messages' (must be a list)"
-            )
     except orjson.JSONDecodeError as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}") from e
 
@@ -2797,12 +2799,21 @@ async def openai_completions_proxy(request: Request):
         max_completion_tokens = payload.get("max_completion_tokens")
         suffix = payload.get("suffix")
 
+        if not model:
+            raise HTTPException(
+                status_code=400, detail="Missing required field 'model'"
+            )
+        if not prompt:
+            raise HTTPException(
+                status_code=400, detail="Missing required field 'prompt'"
+            )
+
         if ":latest" in model:
             model = model.split(":latest")
             model = model[0]
 
         params = {
-            "prompt": prompt, 
+            "prompt": prompt,
             "model": model,
         }
 
@@ -2821,15 +2832,6 @@ async def openai_completions_proxy(request: Request):
         }
 
         params.update({k: v for k, v in optional_params.items() if v is not None})
-
-        if not model:
-            raise HTTPException(
-                status_code=400, detail="Missing required field 'model'"
-            )
-        if not prompt:
-            raise HTTPException(
-                status_code=400, detail="Missing required field 'prompt'"
-            )
     except orjson.JSONDecodeError as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}") from e
 
@@ -3181,7 +3183,7 @@ async def usage_stream(request: Request):
 # -------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event() -> None:
-    global config, db
+    global config, db, token_worker_task, flush_task
     # Load YAML config (or use defaults if not present)
     config_path = _config_path_from_env()
     config = Config.from_yaml(config_path)
