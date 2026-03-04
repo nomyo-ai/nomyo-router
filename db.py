@@ -63,6 +63,7 @@ class TokenDatabase:
                 )
             ''')
             await db.execute('CREATE INDEX IF NOT EXISTS idx_token_time_series_timestamp ON token_time_series(timestamp)')
+            await db.execute('CREATE INDEX IF NOT EXISTS idx_token_time_series_model_ts ON token_time_series(model, timestamp)')
             await db.commit()
 
     async def update_token_counts(self, endpoint: str, model: str, input_tokens: int, output_tokens: int):
@@ -177,6 +178,46 @@ class TokenDatabase:
                         'total_tokens': row[4],
                         'timestamp': row[5]
                     }
+
+    async def get_time_series_for_model(self, model: str, limit: int = 50000):
+        """Get time series entries for a specific model, newest first.
+
+        Uses the (model, timestamp) composite index so the DB does the filtering
+        instead of returning all rows and discarding non-matching ones in Python.
+        """
+        db = await self._get_connection()
+        async with self._operation_lock:
+            async with db.execute('''
+                SELECT endpoint, input_tokens, output_tokens, total_tokens, timestamp
+                FROM token_time_series
+                WHERE model = ?
+                ORDER BY timestamp DESC
+                LIMIT ?
+            ''', (model, limit)) as cursor:
+                async for row in cursor:
+                    yield {
+                        'endpoint': row[0],
+                        'input_tokens': row[1],
+                        'output_tokens': row[2],
+                        'total_tokens': row[3],
+                        'timestamp': row[4],
+                    }
+
+    async def get_endpoint_distribution_for_model(self, model: str) -> dict:
+        """Return total tokens per endpoint for a specific model as a plain dict.
+
+        Computed entirely in SQL so no Python-side aggregation is needed.
+        """
+        db = await self._get_connection()
+        async with self._operation_lock:
+            async with db.execute('''
+                SELECT endpoint, SUM(total_tokens)
+                FROM token_time_series
+                WHERE model = ?
+                GROUP BY endpoint
+            ''', (model,)) as cursor:
+                rows = await cursor.fetchall()
+        return {row[0]: row[1] for row in rows}
 
     async def get_token_counts_for_model(self, model):
         """Get token counts for a specific model, aggregated across all endpoints."""
