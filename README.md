@@ -72,7 +72,21 @@ uvicorn router:app --host 127.0.0.1 --port 12434 --loop uvloop
 
 ## Docker Deployment
 
-Build the container image locally:
+### Pre-built image (GitHub Container Registry)
+
+Pre-built multi-arch images (`linux/amd64`, `linux/arm64`) are published automatically on every release:
+
+```sh
+docker pull ghcr.io/nomyo-ai/nomyo-router:latest
+```
+
+Specific version:
+
+```sh
+docker pull ghcr.io/nomyo-ai/nomyo-router:0.7.0
+```
+
+### Build the container image locally:
 
 ```sh
 docker build -t nomyo-router .
