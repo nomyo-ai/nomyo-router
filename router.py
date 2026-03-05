@@ -1,5 +1,5 @@
 """
-title: NOMYO Router - an Ollama Proxy with Endpoint:Model aware routing
+title: NOMYO Router - an (O)llama and OpenAI API v1 Proxy with Endpoint:Model aware routing
 author: alpha-nerd-nomyo
 author_url: https://github.com/nomyo-ai
 version: 0.7
