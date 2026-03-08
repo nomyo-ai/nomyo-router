@@ -31,24 +31,24 @@ api_keys:
 # Cached routes: /api/chat  /api/generate  /v1/chat/completions  /v1/completions
 # MOE requests (moe-* model prefix) always bypass the cache.
 # -------------------------------------------------------------
-cache_enabled: true
+# cache_enabled: true
 
 # Backend — where cached responses are stored:
 #   memory  → in-process LRU (lost on restart, not shared across replicas) [default]
 #   sqlite  → persistent file-based   (single instance, survives restart)
 #   redis   → distributed             (shared across replicas, requires Redis)
-cache_backend: memory
+# cache_backend: memory
 
 # Cosine similarity threshold for a cache hit:
 #   1.0  → exact match only  (works on any image variant)
 #   <1.0 → semantic matching (requires the :semantic Docker image tag)
-cache_similarity: 0.9
+# cache_similarity: 0.9
 
 # Response TTL in seconds. Remove the key or set to null to cache forever.
-cache_ttl: 3600
+# cache_ttl: 3600
 
 # SQLite backend: path to the cache database file
-cache_db_path: llm_cache.db
+# cache_db_path: llm_cache.db
 
 # Redis backend: connection URL
 # cache_redis_url: redis://localhost:6379/0
