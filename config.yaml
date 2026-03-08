@@ -6,7 +6,7 @@ endpoints:
   - https://api.openai.com/v1
 
 llama_server_endpoints:
-  - http://192.168.0.33:8889/v1
+  - http://192.168.0.50:8889/v1
 
 # Maximum concurrent connections *per endpoint‑model pair* (equals to OLLAMA_NUM_PARALLEL)
 max_concurrent_connections: 2
@@ -22,4 +22,38 @@ api_keys:
   "http://192.168.0.51:11434": "ollama"
   "http://192.168.0.52:11434": "ollama"
   "https://api.openai.com/v1": "${OPENAI_KEY}"
-  "http://192.168.0.33:8889/v1": "llama"
+  "http://192.168.0.50:8889/v1": "llama"
+
+# -------------------------------------------------------------
+# Semantic LLM Cache (optional — disabled by default)
+# Caches LLM responses to cut costs and latency on repeated or
+# semantically similar prompts.
+# Cached routes: /api/chat  /api/generate  /v1/chat/completions  /v1/completions
+# MOE requests (moe-* model prefix) always bypass the cache.
+# -------------------------------------------------------------
+cache_enabled: true
+
+# Backend — where cached responses are stored:
+#   memory  → in-process LRU (lost on restart, not shared across replicas) [default]
+#   sqlite  → persistent file-based   (single instance, survives restart)
+#   redis   → distributed             (shared across replicas, requires Redis)
+cache_backend: memory
+
+# Cosine similarity threshold for a cache hit:
+#   1.0  → exact match only  (works on any image variant)
+#   <1.0 → semantic matching (requires the :semantic Docker image tag)
+cache_similarity: 0.9
+
+# Response TTL in seconds. Remove the key or set to null to cache forever.
+cache_ttl: 3600
+
+# SQLite backend: path to the cache database file
+cache_db_path: llm_cache.db
+
+# Redis backend: connection URL
+# cache_redis_url: redis://localhost:6379/0
+
+# Weight of the BM25-weighted chat-history embedding vs last-user-message embedding.
+# 0.3 = 30% history context signal, 70% question signal.
+# Only relevant when cache_similarity < 1.0.
+# cache_history_weight: 0.3

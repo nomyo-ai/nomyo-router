@@ -39,3 +39,8 @@ uvicorn==0.38.0
 uvloop
 yarl==1.20.1
 aiosqlite
+# Semantic LLM cache — base install (exact-match mode, no heavy ML deps)
+# For semantic mode use the :semantic Docker image tag (adds sentence-transformers + torch)
+# SECURITY: pin to a specific tag or commit hash to prevent supply-chain drift, e.g.:
+#   semantic-llm-cache @ git+https://github.com/nomyo-ai/async-semantic-llm-cache.git@v1.0.0
+semantic-llm-cache @ git+https://github.com/nomyo-ai/async-semantic-llm-cache.git
