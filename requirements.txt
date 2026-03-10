@@ -43,4 +43,4 @@ aiosqlite
 # For semantic mode use the :semantic Docker image tag (adds sentence-transformers + torch)
 # SECURITY: pin to a specific tag or commit hash to prevent supply-chain drift, e.g.:
 #   semantic-llm-cache @ git+https://github.com/nomyo-ai/async-semantic-llm-cache.git@v1.0.0
-semantic-llm-cache @ git+https://github.com/nomyo-ai/async-semantic-llm-cache.git
+semantic-llm-cache@git+https://github.com/nomyo-ai/async-semantic-llm-cache.git@v0.1

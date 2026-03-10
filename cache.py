@@ -14,10 +14,16 @@ Strategy:
 - MOE models (moe-*) always bypass the cache.
 - Token counts are never recorded for cache hits.
 - Streaming cache hits are served as a single-chunk response.
+- Privacy protection: responses that echo back user-identifying tokens from the system
+  prompt (names, emails, IDs) are stored WITHOUT an embedding.  They remain findable
+  by exact-match for the same user but are invisible to cross-user semantic search.
+  Generic responses (capital of France → "Paris") keep their embeddings and can still
+  produce cross-user semantic hits as intended.
 """
 
 import hashlib
 import math
+import re
 import time
 import warnings
 from collections import Counter
@@ -162,6 +168,111 @@ class LLMCache:
         from semantic_llm_cache.utils import hash_prompt, normalize_prompt
         return hash_prompt(normalize_prompt(last_user), namespace)
 
+    # ------------------------------------------------------------------
+    # Privacy helpers — prevent cross-user leakage of personal data
+    # ------------------------------------------------------------------
+
+    _IDENTITY_STOPWORDS = frozenset({
+        "user", "users", "name", "names", "email", "phone", "their", "they",
+        "this", "that", "with", "from", "have", "been", "also", "more",
+        "tags", "identity", "preference", "context",
+    })
+    # Patterns that unambiguously signal personal data in a response
+    _EMAIL_RE    = re.compile(r'\b[\w.%+-]+@[\w.-]+\.[a-zA-Z]{2,}\b')
+    _UUID_RE     = re.compile(
+        r'\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b',
+        re.IGNORECASE,
+    )
+    # Standalone numeric run ≥ 8 digits (common user/account IDs)
+    _NUMERIC_ID_RE = re.compile(r'\b\d{8,}\b')
+
+    def _extract_response_content(self, response_bytes: bytes) -> str:
+        """Parse response bytes (Ollama or OpenAI format) and return the text content."""
+        try:
+            import orjson
+            data = orjson.loads(response_bytes)
+            if "choices" in data:                          # OpenAI ChatCompletion
+                return (data["choices"][0].get("message") or {}).get("content", "")
+            if "message" in data:                          # Ollama chat
+                return (data.get("message") or {}).get("content", "")
+            if "response" in data:                         # Ollama generate
+                return data.get("response", "")
+        except Exception:
+            pass
+        return ""
+
+    def _extract_personal_tokens(self, system: str) -> frozenset[str]:
+        """
+        Extract user-identifying tokens from the system prompt.
+
+        Looks for:
+        - Email addresses anywhere in the system prompt
+        - Numeric IDs (≥ 4 digits) appearing after "id" keyword
+        - Proper-noun-like words from [Tags: identity] lines
+        """
+        if not system:
+            return frozenset()
+
+        tokens: set[str] = set()
+
+        # Email addresses
+        for email in self._EMAIL_RE.findall(system):
+            tokens.add(email.lower())
+
+        # Numeric IDs: "id: 1234", "id=5678"
+        for uid in re.findall(r'\bid\s*[=:]?\s*(\d{4,})\b', system, re.IGNORECASE):
+            tokens.add(uid)
+
+        # Values from [Tags: identity] lines  (e.g. "User's name is Andreas")
+        for line in re.findall(
+            r'\[Tags:.*?identity.*?\]\s*(.+?)(?:\n|$)', system, re.IGNORECASE
+        ):
+            for word in re.findall(r'\b\w{4,}\b', line):
+                w = word.lower()
+                if w not in self._IDENTITY_STOPWORDS:
+                    tokens.add(w)
+
+        return frozenset(tokens)
+
+    def _response_is_personalized(self, response_bytes: bytes, system: str) -> bool:
+        """
+        Return True if the response contains user-personal information.
+
+        Two complementary checks:
+
+        1. Direct PII detection in the response content — emails, UUIDs, long
+           numeric IDs.  Catches data retrieved at runtime via tool calls that
+           never appears in the system prompt.
+
+        2. System-prompt token overlap — words extracted from [Tags: identity]
+           lines that reappear verbatim in the response (catches names, etc.).
+
+        Such responses are stored WITHOUT a semantic embedding so they are
+        invisible to cross-user semantic search while still being cacheable for
+        the same user via exact-match.
+        """
+        content = self._extract_response_content(response_bytes)
+        if not content:
+            # Can't parse → err on the side of caution
+            return bool(response_bytes)
+
+        # 1. Direct PII patterns — independent of what's in the system prompt
+        if (
+            self._EMAIL_RE.search(content)
+            or self._UUID_RE.search(content)
+            or self._NUMERIC_ID_RE.search(content)
+        ):
+            return True
+
+        # 2. System-prompt identity tokens echoed back in the response
+        personal = self._extract_personal_tokens(system)
+        if personal:
+            content_lower = content.lower()
+            if any(token in content_lower for token in personal):
+                return True
+
+        return False
+
     def _parse_messages(
         self, messages: list[dict]
     ) -> tuple[str, list[dict], str]:
@@ -242,10 +353,17 @@ class LLMCache:
         ns = self._namespace(route, model, system)
         key = self._cache_key(ns, last_user)
 
+        print(
+            f"[cache] get_chat route={route} model={model} ns={ns} "
+            f"prompt={last_user[:80]!r} "
+            f"system_snippet={system[:120]!r}"
+        )
+
         # 1. Exact key match
         entry = await self._backend.get(key)
         if entry is not None:
             self._hits += 1
+            print(f"[cache] HIT (exact) ns={ns} prompt={last_user[:80]!r}")
             return entry.response  # type: ignore[return-value]
 
         # 2. Semantic similarity match
@@ -255,11 +373,16 @@ class LLMCache:
                 emb, threshold=self._cfg.cache_similarity, namespace=ns
             )
             if result is not None:
-                _, matched, _ = result
+                _, matched, sim = result
                 self._hits += 1
+                print(
+                    f"[cache] HIT (semantic sim={sim:.3f}) ns={ns} "
+                    f"prompt={last_user[:80]!r} matched={matched.prompt[:80]!r}"
+                )
                 return matched.response  # type: ignore[return-value]
 
         self._misses += 1
+        print(f"[cache] MISS ns={ns} prompt={last_user[:80]!r}")
         return None
 
     async def set_chat(
@@ -276,9 +399,36 @@ class LLMCache:
         ns = self._namespace(route, model, system)
         key = self._cache_key(ns, last_user)
 
+        # Privacy guard: check whether the response contains personal data.
+        personalized = self._response_is_personalized(response_bytes, system)
+
+        if personalized:
+            # Exact-match is only safe when the system prompt is user-specific
+            # (i.e. different per user → different namespace).  When the system
+            # prompt is generic and shared across all users, the namespace is the
+            # same for everyone: storing even without an embedding would let any
+            # user who asks the identical question get another user's personal data
+            # via exact-match.  In that case skip storage entirely.
+            system_is_user_specific = bool(self._extract_personal_tokens(system))
+            if not system_is_user_specific:
+                print(
+                    f"[cache] SKIP personalized response with generic system prompt "
+                    f"route={route} model={model} ns={ns} prompt={last_user[:80]!r} "
+                    f"system_snippet={system[:120]!r}"
+                )
+                return
+
+        print(
+            f"[cache] set_chat route={route} model={model} ns={ns} "
+            f"personalized={personalized} "
+            f"prompt={last_user[:80]!r} "
+            f"system_snippet={system[:120]!r}"
+        )
+        # Store without embedding when personalized (invisible to semantic search
+        # across users, but still reachable by exact-match within this namespace).
         emb = (
             await self._build_embedding(history, last_user)
-            if self._semantic and self._cfg.cache_similarity < 1.0
+            if self._semantic and self._cfg.cache_similarity < 1.0 and not personalized
             else None
         )
 
