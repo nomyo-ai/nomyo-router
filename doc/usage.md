@@ -79,6 +79,8 @@ For OpenAI API compatibility:
 | `/api/config`                      | GET    | Endpoint configuration                   |
 | `/api/usage-stream`                | GET    | Real-time usage updates (SSE)            |
 | `/health`                          | GET    | Health check                             |
+| `/api/cache/stats`                 | GET    | Cache hit/miss counters and config       |
+| `/api/cache/invalidate`            | POST   | Clear all cache entries and counters     |
 
 ## Making Requests
 
@@ -146,6 +148,58 @@ The MOE system:
 2. Generates 3 critiques of those responses
 3. Selects the best response
 4. Generates a final refined response
+
+### Semantic LLM Cache
+
+The router can cache LLM responses and serve them instantly — bypassing endpoint selection, model loading, and token generation entirely. Cached responses work for both streaming and non-streaming clients.
+
+Enable it in `config.yaml`:
+
+```yaml
+cache_enabled: true
+cache_backend: sqlite       # persists across restarts
+cache_similarity: 0.9       # semantic matching (requires :semantic image)
+cache_ttl: 3600
+```
+
+For exact-match only (no extra dependencies):
+
+```yaml
+cache_enabled: true
+cache_backend: sqlite
+cache_similarity: 1.0
+```
+
+Check cache performance:
+
+```bash
+curl http://localhost:12434/api/cache/stats
+```
+
+```json
+{
+  "enabled": true,
+  "hits": 1547,
+  "misses": 892,
+  "hit_rate": 0.634,
+  "semantic": true,
+  "backend": "sqlite",
+  "similarity_threshold": 0.9,
+  "history_weight": 0.3
+}
+```
+
+Clear the cache:
+
+```bash
+curl -X POST http://localhost:12434/api/cache/invalidate
+```
+
+**Notes:**
+- MOE requests (`moe-*` model prefix) always bypass the cache
+- Cache is isolated per `model + system prompt` — different users with different system prompts cannot receive each other's cached responses
+- Semantic matching requires the `:semantic` Docker image tag (`ghcr.io/nomyo-ai/nomyo-router:latest-semantic`)
+- See [configuration.md](configuration.md#semantic-llm-cache) for all cache options
 
 ### Token Tracking
 

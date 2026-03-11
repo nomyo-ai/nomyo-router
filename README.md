@@ -74,22 +74,28 @@ uvicorn router:app --host 127.0.0.1 --port 12434 --loop uvloop
 
 ### Pre-built image (GitHub Container Registry)
 
-Pre-built multi-arch images (`linux/amd64`, `linux/arm64`) are published automatically on every release:
+Pre-built multi-arch images (`linux/amd64`, `linux/arm64`) are published automatically on every release.
 
+**Lean image** (exact-match cache, ~300 MB):
 ```sh
 docker pull ghcr.io/nomyo-ai/nomyo-router:latest
-```
-
-Specific version:
-
-```sh
 docker pull ghcr.io/nomyo-ai/nomyo-router:0.7.0
 ```
 
-### Build the container image locally:
+**Semantic image** (semantic cache with `all-MiniLM-L6-v2` pre-baked, ~800 MB):
+```sh
+docker pull ghcr.io/nomyo-ai/nomyo-router:latest-semantic
+docker pull ghcr.io/nomyo-ai/nomyo-router:0.7.0-semantic
+```
+
+### Build the container image locally
 
 ```sh
+# Lean build (exact match cache, default)
 docker build -t nomyo-router .
+
+# Semantic build — sentence-transformers + model baked in
+docker build --build-arg SEMANTIC_CACHE=true -t nomyo-router:semantic .
 ```
 
 Run the router in Docker with your own configuration file mounted from the host. The entrypoint script accepts a `--config-path` argument so you can point to a file anywhere inside the container:
@@ -123,6 +129,53 @@ This way the Ollama backend servers are utilized more efficient than by simply u
 ![routing](https://github.com/user-attachments/assets/ed05dfbb-fcc8-4ff2-b8ca-3cdce2660c9f)
 
 NOMYO Router also supports OpenAI API compatible v1 backend servers.
+
+## Semantic LLM Cache
+
+NOMYO Router includes an optional semantic cache that serves repeated or semantically similar LLM requests from cache — no endpoint round-trip, no token cost, response in <10 ms.
+
+### Enable (exact match, any image)
+
+```yaml
+# config.yaml
+cache_enabled: true
+cache_backend: sqlite    # persists across restarts
+cache_similarity: 1.0   # exact match only
+cache_ttl: 3600
+```
+
+### Enable (semantic matching, :semantic image)
+
+```yaml
+cache_enabled: true
+cache_backend: sqlite
+cache_similarity: 0.90   # "What is Python?" ≈ "What's Python?" → cache hit
+cache_ttl: 3600
+cache_history_weight: 0.3
+```
+
+Pull the semantic image:
+```bash
+docker pull ghcr.io/nomyo-ai/nomyo-router:latest-semantic
+```
+
+### Cache key strategy
+
+Each request is keyed on `model + system_prompt` (exact) combined with a weighted-mean embedding of BM25-weighted chat history (30%) and the last user message (70%). This means:
+- Different system prompts → always separate cache namespaces (no cross-tenant leakage)
+- Same question, different phrasing → cache hit (semantic mode)
+- MOE requests (`moe-*`) → always bypass the cache
+
+### Cached routes
+
+`/api/chat` · `/api/generate` · `/v1/chat/completions` · `/v1/completions`
+
+### Cache management
+
+```bash
+curl http://localhost:12434/api/cache/stats        # hit rate, counters, config
+curl -X POST http://localhost:12434/api/cache/invalidate  # clear all entries
+```
 
 ## Supplying the router API key
 

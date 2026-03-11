@@ -82,10 +82,23 @@ sudo systemctl status nomyo-router
 
 ## 2. Docker Deployment
 
+### Image variants
+
+| Tag | Semantic cache | Image size |
+|---|---|---|
+| `latest` | ❌ exact match only | ~300 MB |
+| `latest-semantic` | ✅ sentence-transformers + `all-MiniLM-L6-v2` pre-baked | ~800 MB |
+
+The `:semantic` variant enables `cache_similarity < 1.0` in `config.yaml`. The lean image falls back to exact-match caching with a warning if semantic mode is configured.
+
 ### Build the Image
 
 ```bash
+# Lean build (exact match cache, default)
 docker build -t nomyo-router .
+
+# Semantic build (~500 MB larger, all-MiniLM-L6-v2 model baked in at build time)
+docker build --build-arg SEMANTIC_CACHE=true -t nomyo-router:semantic .
 ```
 
 ### Run the Container

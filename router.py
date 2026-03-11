@@ -123,6 +123,22 @@ class Config(BaseSettings):
     # Database configuration
     db_path: str = Field(default=os.getenv("NOMYO_ROUTER_DB_PATH", "token_counts.db"))
 
+    # Semantic LLM Cache configuration
+    cache_enabled: bool = Field(default=False)
+    # Backend: "memory" (default, in-process), "sqlite" (persistent), "redis" (distributed)
+    cache_backend: str = Field(default="memory")
+    # Cosine similarity threshold: 1.0 = exact match only, <1.0 = semantic (requires :semantic image)
+    cache_similarity: float = Field(default=1.0)
+    # TTL in seconds; None = cache forever
+    cache_ttl: Optional[int] = Field(default=3600)
+    # SQLite backend: path to cache database file
+    cache_db_path: str = Field(default="llm_cache.db")
+    # Redis backend: connection URL
+    cache_redis_url: str = Field(default="redis://localhost:6379/0")
+    # Weight of BM25-weighted chat-history embedding vs last-user-message embedding
+    # 0.3 = 30% history context signal, 70% question signal
+    cache_history_weight: float = Field(default=0.3)
+
     class Config:
         # Load from `config.yaml` first, then from env variables
         env_prefix = "NOMYO_ROUTER_"
@@ -188,6 +204,7 @@ def _config_path_from_env() -> Path:
 
 from ollama._types import TokenLogprob, Logprob
 from db import TokenDatabase
+from cache import init_llm_cache, get_llm_cache, openai_nonstream_to_sse
 
 
 # Create the global config object – it will be overwritten on startup
@@ -1583,7 +1600,8 @@ async def proxy(request: Request):
         images = payload.get("images")
         options = payload.get("options")
         keep_alive = payload.get("keep_alive")
-        
+        _cache_enabled = payload.get("nomyo", {}).get("cache", False)
+
         if not model:
             raise HTTPException(
                 status_code=400, detail="Missing required field 'model'"
@@ -1596,7 +1614,15 @@ async def proxy(request: Request):
         error_msg = f"Invalid JSON format in request body: {str(e)}. Please ensure the request is properly formatted."
         raise HTTPException(status_code=400, detail=error_msg) from e
 
-    
+    # Cache lookup — before endpoint selection so no slot is wasted on a hit
+    _cache = get_llm_cache()
+    if _cache is not None and _cache_enabled:
+        _cached = await _cache.get_generate(model, prompt, system or "")
+        if _cached is not None:
+            async def _serve_cached_generate():
+                yield _cached
+            return StreamingResponse(_serve_cached_generate(), media_type="application/json")
+
     endpoint, tracking_model = await choose_endpoint(model)
     use_openai = is_openai_compatible(endpoint)
     if use_openai:
@@ -1633,6 +1659,7 @@ async def proxy(request: Request):
             else:
                 async_gen = await client.generate(model=model, prompt=prompt, suffix=suffix, system=system, template=template, context=context, stream=stream, think=think, raw=raw, format=_format, images=images, options=options, keep_alive=keep_alive)
             if stream == True:
+                content_parts: list[str] = []
                 async for chunk in async_gen:
                     if use_openai:
                         chunk = rechunk.openai_completion2ollama(chunk, stream, start_ts)
@@ -1644,6 +1671,27 @@ async def proxy(request: Request):
                         json_line = chunk.model_dump_json()
                     else:
                         json_line = orjson.dumps(chunk)
+                    # Accumulate and store cache on done chunk — before yield so it always runs
+                    if _cache is not None and _cache_enabled:
+                        if getattr(chunk, "response", None):
+                            content_parts.append(chunk.response)
+                        if getattr(chunk, "done", False):
+                            assembled = orjson.dumps({
+                                k: v for k, v in {
+                                    "model": getattr(chunk, "model", model),
+                                    "response": "".join(content_parts),
+                                    "done": True,
+                                    "done_reason": getattr(chunk, "done_reason", "stop") or "stop",
+                                    "prompt_eval_count": getattr(chunk, "prompt_eval_count", None),
+                                    "eval_count": getattr(chunk, "eval_count", None),
+                                    "total_duration": getattr(chunk, "total_duration", None),
+                                    "eval_duration": getattr(chunk, "eval_duration", None),
+                                }.items() if v is not None
+                            }) + b"\n"
+                            try:
+                                await _cache.set_generate(model, prompt, system or "", assembled)
+                            except Exception as _ce:
+                                print(f"[cache] set_generate (streaming) failed: {_ce}")
                     yield json_line.encode("utf-8") + b"\n"
             else:
                 if use_openai:
@@ -1660,7 +1708,14 @@ async def proxy(request: Request):
                     if hasattr(async_gen, "model_dump_json")
                     else orjson.dumps(async_gen)
                 )
-                yield json_line.encode("utf-8") + b"\n"
+                cache_bytes = json_line.encode("utf-8") + b"\n"
+                yield cache_bytes
+                # Cache non-streaming response
+                if _cache is not None and _cache_enabled:
+                    try:
+                        await _cache.set_generate(model, prompt, system or "", cache_bytes)
+                    except Exception as _ce:
+                        print(f"[cache] set_generate (non-streaming) failed: {_ce}")
 
         finally:
             # Ensure counter is decremented even if an exception occurs
@@ -1695,6 +1750,7 @@ async def chat_proxy(request: Request):
         options = payload.get("options")
         logprobs = payload.get("logprobs")
         top_logprobs = payload.get("top_logprobs")
+        _cache_enabled = payload.get("nomyo", {}).get("cache", False)
 
         if not model:
             raise HTTPException(
@@ -1710,6 +1766,26 @@ async def chat_proxy(request: Request):
             )
     except orjson.JSONDecodeError as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}") from e
+
+    # Cache lookup — before endpoint selection, always bypassed for MOE
+    _is_moe = model.startswith("moe-")
+    _cache = get_llm_cache()
+    # Normalise model name for cache key: strip ":latest" suffix here so that
+    # get_chat and set_chat use the same model string regardless of when the
+    # strip happens further down (line ~1793 strips it for OpenAI endpoints).
+    _cache_model = model[: -len(":latest")] if model.endswith(":latest") else model
+    # Snapshot original messages before any OpenAI-format transformation so that
+    # get_chat and set_chat always use the same key regardless of backend type.
+    _cache_messages = messages
+    if _cache is not None and not _is_moe and _cache_enabled:
+        _cached = await _cache.get_chat("ollama_chat", _cache_model, messages)
+        if _cached is not None:
+            async def _serve_cached_chat():
+                yield _cached
+            return StreamingResponse(
+                _serve_cached_chat(),
+                media_type="application/x-ndjson" if stream else "application/json",
+            )
 
     # 2. Endpoint logic
     if model.startswith("moe-"):
@@ -1764,6 +1840,7 @@ async def chat_proxy(request: Request):
                     async_gen = await client.chat(model=model, messages=messages, tools=tools, stream=stream, think=think, format=_format, options=options, keep_alive=keep_alive, logprobs=logprobs, top_logprobs=top_logprobs)
             if stream == True:
                 tc_acc = {}  # accumulate OpenAI tool-call deltas across chunks
+                content_parts: list[str] = []
                 async for chunk in async_gen:
                     if use_openai:
                         _accumulate_openai_tc_delta(chunk, tc_acc)
@@ -1780,6 +1857,30 @@ async def chat_proxy(request: Request):
                         json_line = chunk.model_dump_json()
                     else:
                         json_line = orjson.dumps(chunk)
+                    # Accumulate and store cache on done chunk — before yield so it always runs
+                    # Works for both Ollama-native and OpenAI-compatible backends; chunks are
+                    # already converted to Ollama format by rechunk before this point.
+                    if _cache is not None and not _is_moe and _cache_enabled:
+                        if chunk.message and getattr(chunk.message, "content", None):
+                            content_parts.append(chunk.message.content)
+                        if getattr(chunk, "done", False):
+                            assembled = orjson.dumps({
+                                k: v for k, v in {
+                                    "model": getattr(chunk, "model", model),
+                                    "created_at": (lambda ca: ca.isoformat() if hasattr(ca, "isoformat") else ca)(getattr(chunk, "created_at", None)),
+                                    "message": {"role": "assistant", "content": "".join(content_parts)},
+                                    "done": True,
+                                    "done_reason": getattr(chunk, "done_reason", "stop") or "stop",
+                                    "prompt_eval_count": getattr(chunk, "prompt_eval_count", None),
+                                    "eval_count": getattr(chunk, "eval_count", None),
+                                    "total_duration": getattr(chunk, "total_duration", None),
+                                    "eval_duration": getattr(chunk, "eval_duration", None),
+                                }.items() if v is not None
+                            }) + b"\n"
+                            try:
+                                await _cache.set_chat("ollama_chat", _cache_model, _cache_messages, assembled)
+                            except Exception as _ce:
+                                print(f"[cache] set_chat (ollama_chat streaming) failed: {_ce}")
                     yield json_line.encode("utf-8") + b"\n"
             else:
                 if use_openai:
@@ -1796,7 +1897,14 @@ async def chat_proxy(request: Request):
                     if hasattr(async_gen, "model_dump_json")
                     else orjson.dumps(async_gen)
                 )
-                yield json_line.encode("utf-8") + b"\n"
+                cache_bytes = json_line.encode("utf-8") + b"\n"
+                yield cache_bytes
+                # Cache non-streaming response (non-MOE; works for both Ollama and OpenAI backends)
+                if _cache is not None and not _is_moe and _cache_enabled:
+                    try:
+                        await _cache.set_chat("ollama_chat", _cache_model, _cache_messages, cache_bytes)
+                    except Exception as _ce:
+                        print(f"[cache] set_chat (ollama_chat non-streaming) failed: {_ce}")
 
         finally:
             # Ensure counter is decremented even if an exception occurs
@@ -2640,6 +2748,7 @@ async def openai_chat_completions_proxy(request: Request):
         tools = payload.get("tools")
         logprobs = payload.get("logprobs")
         top_logprobs = payload.get("top_logprobs")
+        _cache_enabled = payload.get("nomyo", {}).get("cache", False)
 
         if not model:
             raise HTTPException(
@@ -2680,25 +2789,93 @@ async def openai_chat_completions_proxy(request: Request):
     except orjson.JSONDecodeError as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}") from e
 
+    # Reject unsupported image formats (SVG) before doing any work
+    for _msg in messages:
+        for _item in (_msg.get("content") or []) if isinstance(_msg.get("content"), list) else []:
+            if _item.get("type") == "image_url":
+                _url = (_item.get("image_url") or {}).get("url", "")
+                if _url.startswith("data:image/svg") or _url.lower().endswith(".svg"):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="SVG images are not supported. Please convert the image to PNG or JPEG before sending.",
+                    )
+
+    # Cache lookup — before endpoint selection
+    _cache = get_llm_cache()
+    if _cache is not None and _cache_enabled:
+        _cached = await _cache.get_chat("openai_chat", model, messages)
+        if _cached is not None:
+            if stream:
+                _sse = openai_nonstream_to_sse(_cached, model)
+                async def _serve_cached_ochat_stream():
+                    yield _sse
+                return StreamingResponse(_serve_cached_ochat_stream(), media_type="text/event-stream")
+            else:
+                async def _serve_cached_ochat_json():
+                    yield _cached
+                return StreamingResponse(_serve_cached_ochat_json(), media_type="application/json")
+
     # 2. Endpoint logic
     endpoint, tracking_model = await choose_endpoint(model)
     base_url = ep2base(endpoint)
     oclient = openai.AsyncOpenAI(base_url=base_url, default_headers=default_headers, api_key=config.api_keys.get(endpoint, "no-key"))
     # 3. Async generator that streams completions data and decrements the counter
+    async def _normalize_images_in_messages(msgs: list) -> list:
+        """Fetch remote image URLs and convert them to base64 data URLs so
+        Ollama/llama-server can handle them without making outbound HTTP requests."""
+        resolved = []
+        for msg in msgs:
+            content = msg.get("content")
+            if not isinstance(content, list):
+                resolved.append(msg)
+                continue
+            new_content = []
+            for item in content:
+                if item.get("type") == "image_url":
+                    url = (item.get("image_url") or {}).get("url", "")
+                    if url and not url.startswith("data:"):
+                        try:
+                            http: aiohttp.ClientSession = app_state["session"]
+                            async with http.get(url) as resp:
+                                ctype = resp.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+                                img_bytes = await resp.read()
+                            b64 = base64.b64encode(img_bytes).decode("utf-8")
+                            new_content.append({
+                                "type": "image_url",
+                                "image_url": {"url": f"data:{ctype};base64,{b64}"}
+                            })
+                        except Exception as _ie:
+                            print(f"[image] Failed to fetch image URL: {_ie}")
+                            new_content.append(item)
+                    else:
+                        new_content.append(item)
+                else:
+                    new_content.append(item)
+            resolved.append({**msg, "content": new_content})
+        return resolved
+
     async def stream_ochat_response():
         try:
             # The chat method returns a generator of dicts (or GenerateResponse)
             try:
-                async_gen = await oclient.chat.completions.create(**params)
+                # For non-external endpoints (Ollama, llama-server), resolve remote
+                # image URLs to base64 data URLs so the server can handle them locally.
+                send_params = params
+                if not is_ext_openai_endpoint(endpoint):
+                    resolved_msgs = await _normalize_images_in_messages(params.get("messages", []))
+                    send_params = {**params, "messages": resolved_msgs}
+                async_gen = await oclient.chat.completions.create(**send_params)
             except openai.BadRequestError as e:
                 # If tools are not supported by the model, retry without tools
                 if "does not support tools" in str(e):
                     print(f"[openai_chat_completions_proxy] Model {model} doesn't support tools, retrying without tools")
-                    params_without_tools = {k: v for k, v in params.items() if k != "tools"}
+                    params_without_tools = {k: v for k, v in send_params.items() if k != "tools"}
                     async_gen = await oclient.chat.completions.create(**params_without_tools)
                 else:
                     raise
             if stream == True:
+                content_parts: list[str] = []
+                usage_snapshot: dict = {}
                 async for chunk in async_gen:
                     data = (
                         chunk.model_dump_json()
@@ -2715,6 +2892,8 @@ async def openai_chat_completions_proxy(request: Request):
                         has_tool_calls = getattr(delta, "tool_calls", None) is not None
                         if has_content or has_reasoning or has_tool_calls:
                             yield f"data: {data}\n\n".encode("utf-8")
+                        if has_content and delta.content:
+                            content_parts.append(delta.content)
                     elif chunk.usage is not None:
                         # Forward the usage-only final chunk (e.g. from llama-server)
                         yield f"data: {data}\n\n".encode("utf-8")
@@ -2723,12 +2902,24 @@ async def openai_chat_completions_proxy(request: Request):
                     if chunk.usage is not None:
                         prompt_tok = chunk.usage.prompt_tokens or 0
                         comp_tok   = chunk.usage.completion_tokens or 0
+                        usage_snapshot = {"prompt_tokens": prompt_tok, "completion_tokens": comp_tok, "total_tokens": prompt_tok + comp_tok}
                     else:
                         llama_usage = rechunk.extract_usage_from_llama_timings(chunk)
                         if llama_usage:
                             prompt_tok, comp_tok = llama_usage
                     if prompt_tok != 0 or comp_tok != 0:
                         await token_queue.put((endpoint, tracking_model, prompt_tok, comp_tok))
+                # Cache assembled streaming response — before [DONE] so it always runs
+                if _cache is not None and _cache_enabled and content_parts:
+                    assembled = orjson.dumps({
+                        "model": model,
+                        "choices": [{"index": 0, "message": {"role": "assistant", "content": "".join(content_parts)}, "finish_reason": "stop"}],
+                        **({"usage": usage_snapshot} if usage_snapshot else {}),
+                    }) + b"\n"
+                    try:
+                        await _cache.set_chat("openai_chat", model, messages, assembled)
+                    except Exception as _ce:
+                        print(f"[cache] set_chat (openai_chat streaming) failed: {_ce}")
                 yield b"data: [DONE]\n\n"
             else:
                 prompt_tok = 0
@@ -2747,7 +2938,14 @@ async def openai_chat_completions_proxy(request: Request):
                     if hasattr(async_gen, "model_dump_json")
                     else orjson.dumps(async_gen)
                 )
-                yield json_line.encode("utf-8") + b"\n"
+                cache_bytes = json_line.encode("utf-8") + b"\n"
+                yield cache_bytes
+                # Cache non-streaming response
+                if _cache is not None and _cache_enabled:
+                    try:
+                        await _cache.set_chat("openai_chat", model, messages, cache_bytes)
+                    except Exception as _ce:
+                        print(f"[cache] set_chat (openai_chat non-streaming) failed: {_ce}")
 
         finally:
             # Ensure counter is decremented even if an exception occurs
@@ -2786,6 +2984,7 @@ async def openai_completions_proxy(request: Request):
         max_tokens = payload.get("max_tokens")
         max_completion_tokens = payload.get("max_completion_tokens")
         suffix = payload.get("suffix")
+        _cache_enabled = payload.get("nomyo", {}).get("cache", False)
 
         if not model:
             raise HTTPException(
@@ -2823,6 +3022,22 @@ async def openai_completions_proxy(request: Request):
     except orjson.JSONDecodeError as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}") from e
 
+    # Cache lookup — completions prompt mapped to a single-turn messages list
+    _cache = get_llm_cache()
+    _compl_messages = [{"role": "user", "content": prompt}]
+    if _cache is not None and _cache_enabled:
+        _cached = await _cache.get_chat("openai_completions", model, _compl_messages)
+        if _cached is not None:
+            if stream:
+                _sse = openai_nonstream_to_sse(_cached, model)
+                async def _serve_cached_ocompl_stream():
+                    yield _sse
+                return StreamingResponse(_serve_cached_ocompl_stream(), media_type="text/event-stream")
+            else:
+                async def _serve_cached_ocompl_json():
+                    yield _cached
+                return StreamingResponse(_serve_cached_ocompl_json(), media_type="application/json")
+
     # 2. Endpoint logic
     endpoint, tracking_model = await choose_endpoint(model)
     base_url = ep2base(endpoint)
@@ -2834,6 +3049,8 @@ async def openai_completions_proxy(request: Request):
             # The chat method returns a generator of dicts (or GenerateResponse)
             async_gen = await oclient.completions.create(**params)
             if stream == True:
+                text_parts: list[str] = []
+                usage_snapshot: dict = {}
                 async for chunk in async_gen:
                     data = (
                         chunk.model_dump_json()
@@ -2849,6 +3066,8 @@ async def openai_completions_proxy(request: Request):
                         )
                         if has_text or has_reasoning or choice.finish_reason is not None:
                             yield f"data: {data}\n\n".encode("utf-8")
+                        if has_text and choice.text:
+                            text_parts.append(choice.text)
                     elif chunk.usage is not None:
                         # Forward the usage-only final chunk (e.g. from llama-server)
                         yield f"data: {data}\n\n".encode("utf-8")
@@ -2857,12 +3076,24 @@ async def openai_completions_proxy(request: Request):
                     if chunk.usage is not None:
                         prompt_tok = chunk.usage.prompt_tokens or 0
                         comp_tok   = chunk.usage.completion_tokens or 0
+                        usage_snapshot = {"prompt_tokens": prompt_tok, "completion_tokens": comp_tok, "total_tokens": prompt_tok + comp_tok}
                     else:
                         llama_usage = rechunk.extract_usage_from_llama_timings(chunk)
                         if llama_usage:
                             prompt_tok, comp_tok = llama_usage
                     if prompt_tok != 0 or comp_tok != 0:
                         await token_queue.put((endpoint, tracking_model, prompt_tok, comp_tok))
+                # Cache assembled streaming response — before [DONE] so it always runs
+                if _cache is not None and _cache_enabled and text_parts:
+                    assembled = orjson.dumps({
+                        "model": model,
+                        "choices": [{"index": 0, "message": {"role": "assistant", "content": "".join(text_parts)}, "finish_reason": "stop"}],
+                        **({"usage": usage_snapshot} if usage_snapshot else {}),
+                    }) + b"\n"
+                    try:
+                        await _cache.set_chat("openai_completions", model, _compl_messages, assembled)
+                    except Exception as _ce:
+                        print(f"[cache] set_chat (openai_completions streaming) failed: {_ce}")
                 # Final DONE event
                 yield b"data: [DONE]\n\n"
             else:
@@ -2882,7 +3113,14 @@ async def openai_completions_proxy(request: Request):
                     if hasattr(async_gen, "model_dump_json")
                     else orjson.dumps(async_gen)
                 )
-                yield json_line.encode("utf-8") + b"\n"
+                cache_bytes = json_line.encode("utf-8") + b"\n"
+                yield cache_bytes
+                # Cache non-streaming response
+                if _cache is not None and _cache_enabled:
+                    try:
+                        await _cache.set_chat("openai_completions", model, _compl_messages, cache_bytes)
+                    except Exception as _ce:
+                        print(f"[cache] set_chat (openai_completions non-streaming) failed: {_ce}")
 
         finally:
             # Ensure counter is decremented even if an exception occurs
@@ -3077,6 +3315,28 @@ async def rerank_proxy(request: Request):
         await decrement_usage(endpoint, tracking_model)
 
 # -------------------------------------------------------------
+# 25b. Cache management endpoints
+# -------------------------------------------------------------
+@app.get("/api/cache/stats")
+async def cache_stats():
+    """Return hit/miss counters and configuration for the LLM response cache."""
+    c = get_llm_cache()
+    if c is None:
+        return {"enabled": False}
+    return {"enabled": True, **c.stats()}
+
+
+@app.post("/api/cache/invalidate")
+async def cache_invalidate():
+    """Clear all entries from the LLM response cache and reset counters."""
+    c = get_llm_cache()
+    if c is None:
+        return {"enabled": False, "cleared": False}
+    await c.clear()
+    return {"enabled": True, "cleared": True}
+
+
+# -------------------------------------------------------------
 # 26. Serve the static front‑end
 # -------------------------------------------------------------
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -3211,6 +3471,7 @@ async def startup_event() -> None:
     app_state["session"] = session
     token_worker_task = asyncio.create_task(token_worker())
     flush_task = asyncio.create_task(flush_buffer())
+    await init_llm_cache(config)
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
