@@ -2686,6 +2686,21 @@ async def openai_embedding_proxy(request: Request):
         model = payload.get("model")
         doc = payload.get("input")
 
+        # Normalize multimodal input: extract only text parts for embedding models
+        if isinstance(doc, list):
+            normalized = []
+            for item in doc:
+                if isinstance(item, dict):
+                    # Multimodal content part - extract text only, skip images
+                    if item.get("type") == "text":
+                        normalized.append(item.get("text", ""))
+                    # Skip image_url and other non-text types
+                else:
+                    normalized.append(item)
+            doc = normalized if len(normalized) != 1 else normalized[0]
+        elif isinstance(doc, dict) and doc.get("type") == "text":
+            doc = doc.get("text", "")
+
         if not model:
             raise HTTPException(
                 status_code=400, detail="Missing required field 'model'"
