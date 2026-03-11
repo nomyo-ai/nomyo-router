@@ -13,13 +13,14 @@ ARG SEMANTIC_CACHE=false
 ENV HF_HOME=/app/data/hf_cache
 
 # Install SQLite
-RUN apt-get update && apt-get install -y --no-install-recommends sqlite3 \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends sqlite3 \
     && rm -rf /var/lib/apt/lists/*
+
 
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+RUN pip install --root-user-action=ignore --no-cache-dir --upgrade pip \
+    && pip install --root-user-action=ignore --no-cache-dir -r requirements.txt
 
 # Semantic cache deps — only installed when SEMANTIC_CACHE=true
 # CPU-only torch must be installed before sentence-transformers to avoid
