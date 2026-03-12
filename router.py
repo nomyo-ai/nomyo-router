@@ -1100,6 +1100,13 @@ async def _make_chat_request(model: str, messages: list, tools=None, stream: boo
                     n_ctx_limit = err_detail.get("n_ctx", 0)
                     actual_tokens = err_detail.get("n_prompt_tokens", 0)
                     if not n_ctx_limit:
+                        _m = re.search(r"'n_ctx':\s*(\d+)", _e_str)
+                        if _m:
+                            n_ctx_limit = int(_m.group(1))
+                        _m = re.search(r"'n_prompt_tokens':\s*(\d+)", _e_str)
+                        if _m:
+                            actual_tokens = int(_m.group(1))
+                    if not n_ctx_limit:
                         raise
                     msgs_to_trim = params.get("messages", [])
                     cal_target = _calibrated_trim_target(msgs_to_trim, n_ctx_limit, actual_tokens)
@@ -2005,6 +2012,13 @@ async def chat_proxy(request: Request):
                 err_detail = err_body.get("error", {}) if isinstance(err_body, dict) else {}
                 n_ctx_limit = err_detail.get("n_ctx", 0)
                 actual_tokens = err_detail.get("n_prompt_tokens", 0)
+                if not n_ctx_limit:
+                    _m = re.search(r"'n_ctx':\s*(\d+)", _e_str)
+                    if _m:
+                        n_ctx_limit = int(_m.group(1))
+                    _m = re.search(r"'n_prompt_tokens':\s*(\d+)", _e_str)
+                    if _m:
+                        actual_tokens = int(_m.group(1))
                 if not n_ctx_limit:
                     await decrement_usage(endpoint, tracking_model)
                     raise
@@ -3143,6 +3157,15 @@ async def openai_chat_completions_proxy(request: Request):
             err_detail = err_body.get("error", {}) if isinstance(err_body, dict) else {}
             n_ctx_limit = err_detail.get("n_ctx", 0)
             actual_tokens = err_detail.get("n_prompt_tokens", 0)
+            # Fallback: parse from string if body parsing yielded nothing (SDK may not parse llama-server errors)
+            if not n_ctx_limit:
+                import re as _re
+                _m = _re.search(r"'n_ctx':\s*(\d+)", _e_str)
+                if _m:
+                    n_ctx_limit = int(_m.group(1))
+                _m = _re.search(r"'n_prompt_tokens':\s*(\d+)", _e_str)
+                if _m:
+                    actual_tokens = int(_m.group(1))
             print(f"[ctx-trim] n_ctx={n_ctx_limit} actual={actual_tokens}", flush=True)
             if not n_ctx_limit:
                 await decrement_usage(endpoint, tracking_model)
