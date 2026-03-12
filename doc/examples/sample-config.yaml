@@ -30,3 +30,37 @@ api_keys:
   "https://api.openai.com/v1": "${OPENAI_KEY}"
   "http://localhost:8080/v1": "llama-server"  # Optional API key for llama-server - depends on llama_server config
   "http://192.168.0.33:8081/v1": "llama-server"
+
+# -------------------------------------------------------------
+# Semantic LLM Cache (optional — disabled by default)
+# Caches LLM responses to cut costs and latency on repeated or
+# semantically similar prompts.
+# Cached routes: /api/chat  /api/generate  /v1/chat/completions  /v1/completions
+# MOE requests (moe-* model prefix) always bypass the cache.
+# -------------------------------------------------------------
+# cache_enabled: false
+
+# Backend — where cached responses are stored:
+#   memory  → in-process LRU (lost on restart, not shared across replicas) [default]
+#   sqlite  → persistent file-based   (single instance, survives restart)
+#   redis   → distributed             (shared across replicas, requires Redis)
+# cache_backend: memory
+
+# Cosine similarity threshold for a cache hit:
+#   1.0  → exact match only  (works on any image variant)
+#   <1.0 → semantic matching (requires the :semantic Docker image tag)
+# cache_similarity: 1.0
+
+# Response TTL in seconds. Remove the key or set to null to cache forever.
+# cache_ttl: 3600
+
+# SQLite backend: path to the cache database file
+# cache_db_path: llm_cache.db
+
+# Redis backend: connection URL
+# cache_redis_url: redis://localhost:6379/0
+
+# Weight of the BM25-weighted chat-history embedding vs last-user-message embedding.
+# 0.3 = 30% history context signal, 70% question signal.
+# Only relevant when cache_similarity < 1.0.
+# cache_history_weight: 0.3
