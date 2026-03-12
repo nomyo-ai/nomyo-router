@@ -983,7 +983,15 @@ async def _make_chat_request(model: str, messages: list, tools=None, stream: boo
     try:
         if use_openai:
             start_ts = time.perf_counter()
-            response = await oclient.chat.completions.create(**params)
+            try:
+                response = await oclient.chat.completions.create(**params)
+            except openai.InternalServerError as e:
+                if "image input is not supported" in str(e):
+                    print(f"[_make_chat_request] Model {model} doesn't support images, retrying with text-only messages")
+                    params = {**params, "messages": _strip_images_from_messages(params.get("messages", []))}
+                    response = await oclient.chat.completions.create(**params)
+                else:
+                    raise
             if stream:
                 # For streaming, we need to collect all chunks
                 chunks = []
@@ -1211,6 +1219,22 @@ def transform_images_to_data_urls(message_list):
             message["content"] = new_content
 
     return message_list
+
+def _strip_images_from_messages(messages: list) -> list:
+    """Remove image_url parts from message content, keeping only text."""
+    result = []
+    for msg in messages:
+        content = msg.get("content")
+        if isinstance(content, list):
+            text_only = [p for p in content if p.get("type") != "image_url"]
+            if len(text_only) == 1 and text_only[0].get("type") == "text":
+                content = text_only[0]["text"]
+            else:
+                content = text_only
+            result.append({**msg, "content": content})
+        else:
+            result.append(msg)
+    return result
 
 def _accumulate_openai_tc_delta(chunk, accumulator: dict) -> None:
     """Accumulate tool_call deltas from a single OpenAI streaming chunk.
@@ -1831,7 +1855,15 @@ async def chat_proxy(request: Request):
             # The chat method returns a generator of dicts (or GenerateResponse)
             if use_openai:
                 start_ts = time.perf_counter()
-                async_gen = await oclient.chat.completions.create(**params)
+                try:
+                    async_gen = await oclient.chat.completions.create(**params)
+                except openai.InternalServerError as e:
+                    if "image input is not supported" in str(e):
+                        print(f"[chat_proxy] Model {model} doesn't support images, retrying with text-only messages")
+                        params = {**params, "messages": _strip_images_from_messages(params.get("messages", []))}
+                        async_gen = await oclient.chat.completions.create(**params)
+                    else:
+                        raise
             else:
                 if opt == True:
                     # Use the dedicated MOE helper function
@@ -2886,6 +2918,13 @@ async def openai_chat_completions_proxy(request: Request):
                     print(f"[openai_chat_completions_proxy] Model {model} doesn't support tools, retrying without tools")
                     params_without_tools = {k: v for k, v in send_params.items() if k != "tools"}
                     async_gen = await oclient.chat.completions.create(**params_without_tools)
+                else:
+                    raise
+            except openai.InternalServerError as e:
+                # If the model doesn't support image input, strip images and retry
+                if "image input is not supported" in str(e):
+                    print(f"[openai_chat_completions_proxy] Model {model} doesn't support images, retrying with text-only messages")
+                    async_gen = await oclient.chat.completions.create(**{**send_params, "messages": _strip_images_from_messages(send_params.get("messages", []))})
                 else:
                     raise
             if stream == True:
