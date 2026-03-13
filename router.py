@@ -64,6 +64,24 @@ _subscribers: Set[asyncio.Queue] = set()
 _subscribers_lock = asyncio.Lock()
 token_queue: asyncio.Queue[tuple[str, str, int, int]] = asyncio.Queue()
 
+# ------------------------------------------------------------------
+# Active inference connection tracking (for stale-counter audit)
+# ------------------------------------------------------------------
+_INFERENCE_PATHS = frozenset({
+    "/api/generate",
+    "/api/chat",
+    "/api/embeddings",
+    "/api/embed",
+    "/v1/embeddings",
+    "/v1/chat/completions",
+    "/v1/completions",
+    "/v1/rerank",
+    "/rerank",
+})
+_active_inference_count: int = 0
+_active_inference_lock = asyncio.Lock()
+audit_task: asyncio.Task | None = None
+
 # -------------------------------------------------------------
 # Secret handling
 # -------------------------------------------------------------
@@ -407,7 +425,53 @@ async def enforce_router_api_key(request: Request, call_next):
         response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
     return response
-        
+
+# -------------------------------------------------------------
+# Active inference connection middleware
+# -------------------------------------------------------------
+async def _decrement_inference_count() -> None:
+    global _active_inference_count
+    async with _active_inference_lock:
+        _active_inference_count = max(0, _active_inference_count - 1)
+
+
+@app.middleware("http")
+async def track_inference_connections(request: Request, call_next):
+    global _active_inference_count
+    is_inference = (
+        request.method == "POST"
+        and request.url.path in _INFERENCE_PATHS
+    )
+    if is_inference:
+        async with _active_inference_lock:
+            _active_inference_count += 1
+    try:
+        response = await call_next(request)
+    except BaseException:
+        if is_inference:
+            await _decrement_inference_count()
+        raise
+
+    if not is_inference:
+        return response
+
+    # Wrap body_iterator so the decrement fires when the stream is fully
+    # consumed (or closed on client disconnect), not when headers are sent.
+    original_iterator = response.body_iterator
+
+    async def tracked_body():
+        try:
+            async for chunk in original_iterator:
+                yield chunk
+        finally:
+            try:
+                await asyncio.shield(_decrement_inference_count())
+            except asyncio.CancelledError:
+                pass  # shield kept the decrement alive; swallow the re-raise
+
+    response.body_iterator = tracked_body()
+    return response
+
 # -------------------------------------------------------------
 # 3. Global state: per‑endpoint per‑model active connection counters
 # -------------------------------------------------------------
@@ -673,6 +737,37 @@ async def flush_buffer() -> None:
         except Exception as e:
             print(f"[flush_buffer] Error during shutdown flush: {e}")
         raise
+
+async def audit_stale_counters() -> None:
+    """Reset usage counters leaked by cancelled or failed requests.
+
+    When _active_inference_count is 0 every in-flight request has finished
+    streaming and its finally-block has run.  Any usage_counts that remain
+    non-zero at that point were never decremented and are stale.
+    """
+    try:
+        while True:
+            await asyncio.sleep(15)
+            # Hold _active_inference_lock while auditing so a new request
+            # cannot slip in between the zero-check and the reset.
+            async with _active_inference_lock:
+                if _active_inference_count > 0:
+                    continue
+                async with usage_lock:
+                    stale = {
+                        ep: {m: c for m, c in models.items() if c > 0}
+                        for ep, models in usage_counts.items()
+                        if any(c > 0 for c in models.values())
+                    }
+                    if stale:
+                        print(f"[audit] No active connections but stale counters found: {stale} — resetting", flush=True)
+                        for ep, models in stale.items():
+                            for m in models:
+                                usage_counts[ep].pop(m, None)
+                        await publish_snapshot()
+    except asyncio.CancelledError:
+        raise
+
 
 async def flush_remaining_buffers() -> None:
     """
@@ -3828,6 +3923,7 @@ async def startup_event() -> None:
     app_state["session"] = session
     token_worker_task = asyncio.create_task(token_worker())
     flush_task = asyncio.create_task(flush_buffer())
+    audit_task = asyncio.create_task(audit_stale_counters())
     await init_llm_cache(config)
 
 @app.on_event("shutdown")
@@ -3839,3 +3935,5 @@ async def shutdown_event() -> None:
         token_worker_task.cancel()
     if flush_task is not None:
         flush_task.cancel()
+    if audit_task is not None:
+        audit_task.cancel()
