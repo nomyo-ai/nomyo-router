@@ -13,7 +13,7 @@ ARG SEMANTIC_CACHE=false
 ENV HF_HOME=/app/data/hf_cache
 
 # Install SQLite
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends sqlite3 \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends sqlite3 git \
     && rm -rf /var/lib/apt/lists/*
 
 
