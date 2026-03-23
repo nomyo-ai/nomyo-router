@@ -1,0 +1,44 @@
+# Version control
+.git
+.gitignore
+.github
+
+# Environment & secrets
+.env
+.env.*
+*.env
+
+# Python artifacts
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv
+venv
+*.egg-info
+dist
+build
+
+# Local databases (don't bake data into image)
+*.db
+*.db-shm
+*.db-wal
+
+# IDE / editor
+.vscode
+.idea
+*.swp
+*.swo
+
+# Documentation
+doc/
+docs/
+*.md
+
+# Tests
+tests/
+test_*
+
+# Local config overrides
+config.local.yaml

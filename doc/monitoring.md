@@ -133,6 +133,39 @@ Response:
 }
 ```
 
+### Cache Statistics
+
+```bash
+curl http://localhost:12434/api/cache/stats
+```
+
+Response when cache is enabled:
+```json
+{
+  "enabled": true,
+  "hits": 1547,
+  "misses": 892,
+  "hit_rate": 0.634,
+  "semantic": true,
+  "backend": "sqlite",
+  "similarity_threshold": 0.9,
+  "history_weight": 0.3
+}
+```
+
+Response when cache is disabled:
+```json
+{ "enabled": false }
+```
+
+### Cache Invalidation
+
+```bash
+curl -X POST http://localhost:12434/api/cache/invalidate
+```
+
+Clears all cached entries and resets hit/miss counters.
+
 ### Real-time Usage Stream
 
 ```bash

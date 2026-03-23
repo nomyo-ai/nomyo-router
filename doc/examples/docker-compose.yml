@@ -1,20 +1,30 @@
 # Docker Compose example for NOMYO Router with multiple Ollama instances
+#
+# Two router profiles are provided:
+#   nomyo-router          — lean image, exact-match cache only (~300 MB)
+#   nomyo-router-semantic — semantic image, sentence-transformers baked in (~800 MB)
+#
+# Uncomment the redis service and set cache_backend: redis in config.yaml
+# to share the LLM response cache across multiple router replicas.
 
 version: '3.8'
 
 services:
-  # NOMYO Router
+  # NOMYO Router — lean image (exact-match cache, default)
   nomyo-router:
     image: nomyo-router:latest
-    build: .
+    build:
+      context: .
+      args:
+        SEMANTIC_CACHE: "false"
     ports:
       - "12434:12434"
     environment:
       - CONFIG_PATH=/app/config/config.yaml
-      - NOMYO_ROUTER_DB_PATH=/app/token_counts.db
+      - NOMYO_ROUTER_DB_PATH=/app/data/token_counts.db
     volumes:
       - ./config:/app/config
-      - router-db:/app/token_counts.db
+      - router-data:/app/data
     depends_on:
       - ollama1
       - ollama2
@@ -22,6 +32,45 @@ services:
     restart: unless-stopped
     networks:
       - nomyo-net
+
+  # NOMYO Router — semantic image (cache_similarity < 1.0 support, ~800 MB)
+  # Build:  docker compose build nomyo-router-semantic
+  # Switch: comment out nomyo-router above, uncomment this block.
+  # nomyo-router-semantic:
+  #   image: nomyo-router:semantic
+  #   build:
+  #     context: .
+  #     args:
+  #       SEMANTIC_CACHE: "true"
+  #   ports:
+  #     - "12434:12434"
+  #   environment:
+  #     - CONFIG_PATH=/app/config/config.yaml
+  #     - NOMYO_ROUTER_DB_PATH=/app/data/token_counts.db
+  #   volumes:
+  #     - ./config:/app/config
+  #     - router-data:/app/data
+  #     - hf-cache:/app/data/hf_cache   # share HuggingFace model cache across builds
+  #   depends_on:
+  #     - ollama1
+  #     - ollama2
+  #     - ollama3
+  #   restart: unless-stopped
+  #   networks:
+  #     - nomyo-net
+
+  # Optional: Redis for shared LLM response cache across multiple router replicas.
+  # Requires cache_backend: redis in config.yaml.
+  # redis:
+  #   image: redis:7-alpine
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis-data:/data
+  #   command: redis-server --save 60 1 --loglevel warning
+  #   restart: unless-stopped
+  #   networks:
+  #     - nomyo-net
 
   # Ollama Instance 1
   ollama1:
@@ -87,7 +136,9 @@ services:
       - nomyo-net
 
 volumes:
-  router-db:
+  router-data:
+  # hf-cache:     # uncomment when using nomyo-router-semantic
+  # redis-data:   # uncomment when using Redis cache backend
   ollama1-data:
   ollama2-data:
   ollama3-data:
