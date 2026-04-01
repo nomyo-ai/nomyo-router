@@ -24,7 +24,7 @@ doc/
 1. **Install the router**:
 
    ```bash
-   git clone https://github.com/nomyo-ai/nomyo-router.git
+   git clone https://bitfreedom.net/code/nomyo-ai/nomyo-router.git
    cd nomyo-router
    python3 -m venv .venv/router
    source .venv/router/bin/activate
@@ -36,14 +36,19 @@ doc/
    endpoints:
      - http://localhost:11434
    max_concurrent_connections: 2
-  # Optional router-level API key (leave blank to disable)
-  nomyo-router-api-key: ""
    ```
+
+# Optional router-level API key (leave blank to disable)
+
+nomyo-router-api-key: ""
+
+```
 3. **Run the router**:
 
-   ```bash
-   uvicorn router:app --host 0.0.0.0 --port 12434
-   ```
+```bash
+uvicorn router:app --host 0.0.0.0 --port 12434
+```
+
 4. **Use the router**: Point your frontend to `http://localhost:12434` instead of your Ollama instance.
 
 ### Key Features
@@ -138,14 +143,15 @@ For additional help:
 
 Happy routing! 🚀
 
-
 ## Router API key usage
 
 If the router API key is set (`NOMYO_ROUTER_API_KEY` env or `nomyo-router-api-key` in config), include it in every request:
+
 - Header (preferred): Authorization: Bearer <router_key>
 - Query param: ?api_key=<router_key>
 
 Example:
+
 ```bash
 curl -H "Authorization: Bearer $NOMYO_ROUTER_API_KEY" http://localhost:12434/api/tags
 ```

@@ -16,7 +16,7 @@ NOMYO Router can be deployed in various environments depending on your requireme
 
 ```bash
 # Clone the repository
-git clone https://github.com/nomyo-ai/nomyo-router.git
+git clone https://bitfreedom.net/code/nomyo-ai/nomyo-router.git
 cd nomyo-router
 
 # Create virtual environment
@@ -84,10 +84,11 @@ sudo systemctl status nomyo-router
 
 ### Image variants
 
-| Tag | Semantic cache | Image size |
-|---|---|---|
-| `latest` | ❌ exact match only | ~300 MB |
-| `latest-semantic` | ✅ sentence-transformers + `all-MiniLM-L6-v2` pre-baked | ~800 MB |
+
+| Tag               | Semantic cache                                         | Image size |
+| ------------------- | -------------------------------------------------------- | ------------ |
+| `latest`          | ❌ exact match only                                    | ~300 MB    |
+| `latest-semantic` | ✅ sentence-transformers +`all-MiniLM-L6-v2` pre-baked | ~800 MB    |
 
 The `:semantic` variant enables `cache_similarity < 1.0` in `config.yaml`. The lean image falls back to exact-match caching with a warning if semantic mode is configured.
 

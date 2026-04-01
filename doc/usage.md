@@ -5,7 +5,7 @@
 ### 1. Install the Router
 
 ```bash
-git clone https://github.com/nomyo-ai/nomyo-router.git
+git clone https://bitfreedom.net/code/nomyo-ai/nomyo-router.git
 cd nomyo-router
 python3 -m venv .venv/router
 source .venv/router/bin/activate
@@ -42,8 +42,9 @@ Configure your frontend to point to `http://localhost:12434` instead of your Oll
 
 The router provides all standard Ollama API endpoints:
 
+
 | Endpoint        | Method | Description           |
-| --------------- | ------ | --------------------- |
+| ----------------- | -------- | ----------------------- |
 | `/api/generate` | POST   | Generate text         |
 | `/api/chat`     | POST   | Chat completions      |
 | `/api/embed`    | POST   | Embeddings            |
@@ -60,8 +61,9 @@ The router provides all standard Ollama API endpoints:
 
 For OpenAI API compatibility:
 
+
 | Endpoint               | Method | Description      |
-| ---------------------- | ------ | ---------------- |
+| ------------------------ | -------- | ------------------ |
 | `/v1/chat/completions` | POST   | Chat completions |
 | `/v1/completions`      | POST   | Text completions |
 | `/v1/embeddings`       | POST   | Embeddings       |
@@ -69,18 +71,19 @@ For OpenAI API compatibility:
 
 ### Monitoring Endpoints
 
-| Endpoint                           | Method | Description                              |
-| ---------------------------------- | ------ | ---------------------------------------- |
-| `/api/usage`                       | GET    | Current connection counts                |
-| `/api/token_counts`                | GET    | Token usage statistics                   |
-| `/api/stats`                       | POST   | Detailed model statistics                |
-| `/api/aggregate_time_series_days`  | POST   | Aggregate time series data into daily    |
-| `/api/version`                     | GET    | Ollama version info                      |
-| `/api/config`                      | GET    | Endpoint configuration                   |
-| `/api/usage-stream`                | GET    | Real-time usage updates (SSE)            |
-| `/health`                          | GET    | Health check                             |
-| `/api/cache/stats`                 | GET    | Cache hit/miss counters and config       |
-| `/api/cache/invalidate`            | POST   | Clear all cache entries and counters     |
+
+| Endpoint                          | Method | Description                           |
+| ----------------------------------- | -------- | --------------------------------------- |
+| `/api/usage`                      | GET    | Current connection counts             |
+| `/api/token_counts`               | GET    | Token usage statistics                |
+| `/api/stats`                      | POST   | Detailed model statistics             |
+| `/api/aggregate_time_series_days` | POST   | Aggregate time series data into daily |
+| `/api/version`                    | GET    | Ollama version info                   |
+| `/api/config`                     | GET    | Endpoint configuration                |
+| `/api/usage-stream`               | GET    | Real-time usage updates (SSE)         |
+| `/health`                         | GET    | Health check                          |
+| `/api/cache/stats`                | GET    | Cache hit/miss counters and config    |
+| `/api/cache/invalidate`           | POST   | Clear all cache entries and counters  |
 
 ## Making Requests
 
@@ -196,6 +199,7 @@ curl -X POST http://localhost:12434/api/cache/invalidate
 ```
 
 **Notes:**
+
 - MOE requests (`moe-*` model prefix) always bypass the cache
 - Cache is isolated per `model + system prompt` — different users with different system prompts cannot receive each other's cached responses
 - Semantic matching requires the `:semantic` Docker image tag (`ghcr.io/nomyo-ai/nomyo-router:latest-semantic`)
@@ -404,14 +408,15 @@ print(f"Available models: {[m.id for m in response.data]}")
 
 See the [examples](examples/) directory for complete integration examples.
 
-
 ### Authentication to NOMYO Router
 
 If a router API key is configured, include it with each request:
+
 - Header: Authorization: Bearer <router_key>
 - Query: ?api_key=<router_key>
 
 Example (tags):
+
 ```bash
 curl -H "Authorization: Bearer $NOMYO_ROUTER_API_KEY" http://localhost:12434/api/tags
 ```

@@ -42,4 +42,4 @@ yarl==1.20.1
 aiosqlite
 # Semantic LLM cache — base install (exact-match mode, no heavy ML deps)
 # For semantic mode use the :semantic Docker image tag (adds sentence-transformers + torch)
-semantic-llm-cache@git+https://github.com/nomyo-ai/async-semantic-llm-cache.git@v0.1
+semantic-llm-cache@git+https://bitfreedom.net/code/nomyo-ai/async-semantic-llm-cache.git@v0.1.1
