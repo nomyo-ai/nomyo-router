@@ -1092,7 +1092,9 @@ function renderTimeSeriesChart(timeSeriesData, chart, minutes) {
             function updateTpsChart(payload) {
                 const tokens = payload.token_usage_counts || {};
                 const perModelTokens = {};
-                psRows.forEach((_, model) => {
+                const allModels = new Set();
+                for (const ep in tokens) for (const model in tokens[ep]) allModels.add(model);
+                allModels.forEach(model => {
                     let total = 0;
                     for (const ep in tokens) total += tokens[ep]?.[model] || 0;
                     // Normalise against the first-seen cumulative total so history
