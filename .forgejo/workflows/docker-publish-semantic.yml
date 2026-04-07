@@ -148,13 +148,3 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.CACHE_IMAGE }}:platform-semantic-amd64 \
             ${{ env.REGISTRY }}/${{ env.CACHE_IMAGE }}:platform-semantic-arm64
 
-      - name: Delete intermediate platform tags
-        run: |
-          CACHE_NAME="${{ env.CACHE_IMAGE }}"
-          CACHE_NAME="${CACHE_NAME##*/}"
-          for tag in platform-semantic-amd64 platform-semantic-arm64; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
-              -H "Authorization: token ${{ secrets.REGISTRY_TOKEN }}" \
-              "https://${{ env.REGISTRY }}/api/v1/packages/${{ github.repository_owner }}/container/${CACHE_NAME}/${tag}")
-            echo "DELETE ${tag}: HTTP ${STATUS}"
-          done
