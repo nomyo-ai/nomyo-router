@@ -89,7 +89,7 @@ jobs:
             SEMANTIC_CACHE=true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:semantic-platform-${{ matrix.arch }}
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}:semantic-buildcache-${{ matrix.arch }}
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}:semantic-buildcache-${{ matrix.arch }},mode=max
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}:semantic-buildcache-${{ matrix.arch }},mode=max,registry=${{ env.REGISTRY }}
 
   merge:
     runs-on: docker-amd64
