@@ -80,14 +80,14 @@ Pre-built multi-arch images (`linux/amd64`, `linux/arm64`) are published automat
 
 ```sh
 docker pull bitfreedom.net/nomyo-ai/nomyo-router:latest
-docker pull bitfreedom.net/nomyo-ai/nomyo-router:v0.7.0
+docker pull bitfreedom.net/nomyo-ai/nomyo-router:0.7
 ```
 
 **Semantic image** (semantic cache with `all-MiniLM-L6-v2` pre-baked, ~800 MB):
 
 ```sh
 docker pull bitfreedom.net/nomyo-ai/nomyo-router:latest-semantic
-docker pull bitfreedom.net/nomyo-ai/nomyo-router:0.7.0-semantic
+docker pull bitfreedom.net/nomyo-ai/nomyo-router:0.7-semantic
 ```
 
 ### Build the container image locally

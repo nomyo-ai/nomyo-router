@@ -79,7 +79,7 @@ jobs:
           provenance: false
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:platform-${{ matrix.arch }}
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-${{ matrix.arch }}
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-${{ matrix.arch }},mode=min
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-${{ matrix.arch }},mode=max
 
   merge:
     runs-on: docker-amd64
@@ -94,7 +94,7 @@ jobs:
       - name: Install Docker
         run: |
           apt-get update -qq
-          apt-get install -y -qq docker.io jq curl
+          apt-get install -y -qq docker.io jq
 
       - name: Start Docker daemon
         run: |
@@ -123,6 +123,8 @@ jobs:
         uses: https://github.com/docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          flavor: |
+            latest=false
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -136,13 +138,3 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:platform-amd64 \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:platform-arm64
 
-      - name: Delete intermediate platform tags
-        run: |
-          PACKAGE_NAME="${{ env.IMAGE_NAME }}"
-          PACKAGE_NAME="${PACKAGE_NAME##*/}"
-          for tag in platform-amd64 platform-arm64; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
-              -H "Authorization: token ${{ secrets.REGISTRY_TOKEN }}" \
-              "https://${{ env.REGISTRY }}/api/v1/packages/${{ github.repository_owner }}/container/${PACKAGE_NAME}/${tag}")
-            echo "DELETE ${tag}: HTTP ${STATUS}"
-          done
