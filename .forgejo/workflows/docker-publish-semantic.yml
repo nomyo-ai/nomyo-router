@@ -15,11 +15,11 @@ on:
       - "v*.*.*"
   workflow_dispatch:
 
-env:
-  REGISTRY: bitfreedom.net
-  IMAGE_NAME: ${{ github.repository }}
-  CACHE_IMAGE: ${{ github.repository }}-buildcache-semantic
-  DOCKER_BUILD_SUMMARY: "false"
+  env:
+    REGISTRY: bitfreedom.net
+    IMAGE_NAME: ${{ github.repository }}
+    CACHE_REF: ${{ env.REGISTRY }}/${{ github.repository }}:semantic-buildcache-${{ matrix.arch }}
+    DOCKER_BUILD_SUMMARY: "false"
 
 jobs:
   build:
@@ -87,9 +87,9 @@ jobs:
           provenance: false
           build-args: |
             SEMANTIC_CACHE=true
-          tags: ${{ env.REGISTRY }}/${{ env.CACHE_IMAGE }}:platform-semantic-${{ matrix.arch }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.CACHE_IMAGE }}:platform-semantic-${{ matrix.arch }}
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.CACHE_IMAGE }}:platform-semantic-${{ matrix.arch }},mode=max
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:semantic-platform-${{ matrix.arch }}
+          cache-from: type=registry,ref=${{ env.CACHE_REF }}
+          cache-to: type=registry,ref=${{ env.CACHE_REF }},mode=max
 
   merge:
     runs-on: docker-amd64
@@ -145,6 +145,6 @@ jobs:
         run: |
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            ${{ env.REGISTRY }}/${{ env.CACHE_IMAGE }}:platform-semantic-amd64 \
-            ${{ env.REGISTRY }}/${{ env.CACHE_IMAGE }}:platform-semantic-arm64
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:semantic-platform-amd64 \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:semantic-platform-arm64
 
