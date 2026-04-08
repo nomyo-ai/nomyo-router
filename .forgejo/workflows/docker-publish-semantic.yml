@@ -18,7 +18,7 @@ on:
   env:
     REGISTRY: bitfreedom.net
     IMAGE_NAME: ${{ github.repository }}
-    CACHE_REF: ${{ env.REGISTRY }}/${{ github.repository }}:semantic-buildcache-${{ matrix.arch }}
+
     DOCKER_BUILD_SUMMARY: "false"
 
 jobs:
@@ -88,8 +88,8 @@ jobs:
           build-args: |
             SEMANTIC_CACHE=true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:semantic-platform-${{ matrix.arch }}
-          cache-from: type=registry,ref=${{ env.CACHE_REF }}
-          cache-to: type=registry,ref=${{ env.CACHE_REF }},mode=max
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}:semantic-buildcache-${{ matrix.arch }}
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}:semantic-buildcache-${{ matrix.arch }},mode=max
 
   merge:
     runs-on: docker-amd64
