@@ -88,8 +88,8 @@ jobs:
           build-args: |
             SEMANTIC_CACHE=true
           tags: ${{ env.REGISTRY }}/${{ env.CACHE_IMAGE }}:platform-semantic-${{ matrix.arch }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.CACHE_IMAGE }}:buildcache-semantic-${{ matrix.arch }}
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.CACHE_IMAGE }}:buildcache-semantic-${{ matrix.arch }},mode=min
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.CACHE_IMAGE }}:platform-semantic-${{ matrix.arch }}
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.CACHE_IMAGE }}:platform-semantic-${{ matrix.arch }},mode=max
 
   merge:
     runs-on: docker-amd64
