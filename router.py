@@ -2110,7 +2110,11 @@ async def chat_proxy(request: Request):
                         # Only cache when no max_tokens limit was set — otherwise
                         # finish_reason=length might just mean max_tokens was hit,
                         # not that the context window was exhausted.
-                        _req_max_tok = params.get("max_tokens") or params.get("max_completion_tokens") or params.get("num_predict")
+                        _req_max_tok = (
+                            params.get("max_tokens") or params.get("max_completion_tokens") or params.get("num_predict")
+                            if use_openai else
+                            (options.get("num_predict") if options else None)
+                        )
                         if _dr == "length" and not _req_max_tok:
                             _pt = getattr(chunk, "prompt_eval_count", 0) or 0
                             _ct = getattr(chunk, "eval_count", 0) or 0
