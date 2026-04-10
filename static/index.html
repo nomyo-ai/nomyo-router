@@ -344,6 +344,7 @@
         </div>
         <div class="header-row">
             <h1>Router Dashboard</h1>
+            <span id="hostname" style="color:#777; font-size:0.85em;"></span>
             <button id="total-tokens-btn">Stats Total</button>
             <span id="aggregation-status" class="loading" style="margin-left:8px;"></span>
         </div>
@@ -1418,6 +1419,11 @@ function initStatsChart(timeSeriesData, endpointDistribution) {
         </script>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+    authedFetch('/api/hostname').then(r => r.json()).then(data => {
+        const el = document.getElementById('hostname');
+        if (el && data.hostname) el.textContent = data.hostname;
+    }).catch(() => {});
+
     const totalBtn = document.getElementById('total-tokens-btn');
     if (totalBtn) {
         totalBtn.addEventListener('click', async () => {
