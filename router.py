@@ -373,7 +373,11 @@ async def enforce_router_api_key(request: Request, call_next):
         return await call_next(request)
 
     path = request.url.path
-    if path.startswith("/static") or path in {"/", "/favicon.ico"}:
+    # Allow static assets (CSS, JS, images, fonts) but NOT HTML pages,
+    # which would bypass auth by accessing /static/index.html directly.
+    _STATIC_ASSET_EXTS = {".css", ".js", ".ico", ".png", ".jpg", ".jpeg", ".svg", ".woff", ".woff2", ".ttf", ".map"}
+    is_static_asset = path.startswith("/static") and Path(path).suffix.lower() in _STATIC_ASSET_EXTS
+    if is_static_asset or path in {"/", "/favicon.ico"}:
         return await call_next(request)
 
     provided_key = _extract_router_api_key(request)
