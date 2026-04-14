@@ -2,6 +2,8 @@
 
 is a transparent proxy for [Ollama](https://github.com/ollama/ollama) with model deployment aware routing.
 
+We continue active development over at [https://bitfreedom.net/code/nomyo-ai/nomyo-router](https://bitfreedom.net/code/nomyo-ai/nomyo-router)
+
 [![Click for video](https://github.com/user-attachments/assets/ddacdf88-e3f3-41dd-8be6-f165b22d9879)](https://eu1.nomyo.ai/assets/dash.mp4)
 
 It runs between your frontend application and Ollama backend and is transparent for both, the front- and backend.
@@ -72,7 +74,7 @@ uvicorn router:app --host 127.0.0.1 --port 12434 --loop uvloop
 
 ## Docker Deployment
 
-### Pre-built image (GitHub Container Registry)
+### Pre-built image (Bitfreedom Container Registry)
 
 Pre-built multi-arch images (`linux/amd64`, `linux/arm64`) are published automatically on every release.
 
