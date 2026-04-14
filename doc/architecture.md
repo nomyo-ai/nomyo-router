@@ -127,6 +127,34 @@ The router can proxy requests to OpenAI-compatible endpoints alongside Ollama en
 - Handles authentication with API keys
 - Maintains consistent behavior across endpoint types
 
+### Reactive Context-Shift
+
+When a backend returns a `exceed_context_size_error` (context window exceeded), the router automatically trims the conversation history and retries rather than surfacing the error to the client.
+
+**How it works:**
+
+1. The error body contains `n_ctx` (the model's context limit) and `n_prompt_tokens` (the actual token count as measured by the backend).
+2. `_calibrated_trim_target()` computes a tiktoken-scale trim target using the *delta* between actual tokens and the context limit, correcting for the fact that tiktoken counts fewer tokens than the backend tokeniser does.
+3. `_trim_messages_for_context()` implements a sliding-window drop: system messages are always preserved; the oldest non-system messages are evicted first (FIFO) until the estimated token count fits the target. The most recent message is never dropped. After trimming, leading assistant/tool messages are removed to satisfy chat-template requirements (first non-system message must be a user message).
+4. Two retry attempts are made:
+   - **Retry 1** — trimmed messages, original tool definitions.
+   - **Retry 2** — trimmed messages with tool definitions also stripped (handles cases where tool schemas alone consume too many tokens).
+
+**Proactive pre-trimming:**
+
+Once a context overflow has been observed for an endpoint/model pair whose `n_ctx` ≤ 32 768, the router records that limit in `_endpoint_nctx`. Subsequent requests to the same pair are pre-trimmed before being sent, avoiding the round-trip to the backend entirely for small-context models.
+
+### Reactive SSE Push
+
+The `/api/usage-stream` endpoint delivers real-time usage updates using a pub/sub push model rather than client polling.
+
+**Mechanism:**
+
+- `subscribe()` creates a bounded `asyncio.Queue` (capacity 10) and registers it in `_subscribers`.
+- Whenever `usage_counts` or `token_usage_counts` change — on every `increment_usage`, `decrement_usage`, or token-worker flush — `_capture_snapshot()` serialises the current state to JSON while the caller still holds the relevant lock, then `_distribute_snapshot()` pushes the snapshot to every registered queue outside the lock.
+- If a subscriber's queue is full (slow client), the oldest undelivered snapshot is evicted before the new one is enqueued, so fast producers never block on slow consumers.
+- `unsubscribe()` removes the queue when the SSE connection closes; `close_all_sse_queues()` sends a `None` sentinel to all subscribers during router shutdown.
+
 ## Performance Considerations
 
 ### Concurrency Model
@@ -145,7 +173,7 @@ The router can proxy requests to OpenAI-compatible endpoints alongside Ollama en
 ### Memory Management
 
 - **Write-behind pattern**: Token counts buffered in memory, flushed periodically
-- **Queue-based SSE**: Server-Sent Events use bounded queues to prevent memory bloat
+- **Queue-based SSE**: Bounded per-subscriber queues (capacity 10) with oldest-eviction — see [Reactive SSE Push](#reactive-sse-push)
 - **Automatic cleanup**: Zero connection counts are removed from tracking
 
 ## Error Handling
