@@ -26,8 +26,8 @@ RUN pip install --root-user-action=ignore --no-cache-dir --upgrade pip \
 # CPU-only torch must be installed before sentence-transformers to avoid
 # pulling the full CUDA-enabled build (~2.5 GB).
 RUN if [ "$SEMANTIC_CACHE" = "true" ]; then \
-      pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu && \
-      pip install --no-cache-dir sentence-transformers && \
+      pip install --root-user-action=ignore --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu && \
+      pip install --root-user-action=ignore --no-cache-dir sentence-transformers && \
       python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"; \
     fi
 
